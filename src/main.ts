@@ -221,29 +221,43 @@ class OpsApp {
             </div>
 
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-              <div style="display: flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid #cbd5e1; padding: 4px 8px; border-radius: 6px;">
-                <span style="font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase;">Role Switch:</span>
-                <select id="selectQuickSwitchUser" style="border: none; background: transparent; font-size: 11px; font-weight: 700; color: #075545; cursor: pointer; outline: none;">
-                  ${users.filter(u => u.status === 'Active').map(u => `
-                    <option value="${u.userId}" ${u.userId === currentUser.userId ? 'selected' : ''}>
-                      ${u.fullName} — ${u.role}
-                    </option>
-                  `).join('')}
-                </select>
-              </div>
+              <span class="ops-badge ${opsStore.isDemoMode() ? 'badge-pending' : 'badge-ok'}" style="padding: 5px 10px; font-size: 11px;">
+                ${opsStore.isDemoMode() ? '🧪 Isolated Demo Sandbox' : '🔒 Production Mode (RBAC Enforced)'}
+              </span>
 
-              <button id="btnPreloadDemo" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px;">
-                Preload Demo
+              <button id="btnToggleSandboxMode" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px;">
+                ${opsStore.isDemoMode() ? 'Switch to Production' : 'Enter Demo Sandbox'}
               </button>
-              <button id="btnResetClean" class="btn-brand-outline" style="color: #b91c1c; border-color: #fecaca; font-size: 11px; padding: 6px 10px;">
-                Reset Clean
-              </button>
+
+              ${opsStore.isDemoMode() ? `
+                <div style="display: flex; align-items: center; gap: 6px; background: #fffbeb; border: 1px solid #fde68a; padding: 4px 8px; border-radius: 6px;">
+                  <span style="font-size: 10px; font-weight: 700; color: #92400e; text-transform: uppercase;">Sandbox Role:</span>
+                  <select id="selectQuickSwitchUser" style="border: none; background: transparent; font-size: 11px; font-weight: 700; color: #075545; cursor: pointer; outline: none;">
+                    ${users.filter(u => u.status === 'Active').map(u => `
+                      <option value="${u.userId}" ${u.userId === currentUser.userId ? 'selected' : ''}>
+                        ${u.fullName} — ${u.role}
+                      </option>
+                    `).join('')}
+                  </select>
+                </div>
+              ` : ''}
+
+              ${opsStore.canCurrentUser('IMPORT_RESET_DATABASE') ? `
+                <button id="btnPreloadDemo" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px;">
+                  Preload Demo
+                </button>
+                <button id="btnResetClean" class="btn-brand-outline" style="color: #b91c1c; border-color: #fecaca; font-size: 11px; padding: 6px 10px;">
+                  Reset Clean
+                </button>
+              ` : ''}
               <button id="btnExportJson" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px;">
                 Backup JSON
               </button>
-              <button id="btnImportJson" class="btn-brand-outline" style="color: #1d4ed8; border-color: #bfdbfe; font-size: 11px; padding: 6px 10px;">
-                Restore JSON
-              </button>
+              ${opsStore.canCurrentUser('IMPORT_RESET_DATABASE') ? `
+                <button id="btnImportJson" class="btn-brand-outline" style="color: #1d4ed8; border-color: #bfdbfe; font-size: 11px; padding: 6px 10px;">
+                  Restore JSON
+                </button>
+              ` : ''}
               <input type="file" id="inputImportJson" accept=".json" style="display: none;" />
               <a href="https://www.civitasestate.com" target="_blank" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px; text-decoration: none;">
                 civitasestate.com &nearr;
@@ -532,14 +546,14 @@ class OpsApp {
             ${u.status !== 'Active' ? `<span class="ops-badge badge-attention" style="font-size: 10px;">Suspended</span>` : ''}
           </div>
           <div style="font-size: 11px; color: #cbd5e1;">
-            ${u.email} &bull; PIN: <code style="color: #fed7aa; font-weight: 700;">${u.pinCode}</code>
+            ${u.email} (${u.userId}) &bull; <span style="color: #86efac;">🔒 Salted SHA-256 Auth</span>
           </div>
           <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
             ${u.notes || u.department}
           </div>
         </div>
-        <button class="btn-brand-terracotta btn-quick-role-login" data-userid="${u.userId}" ${u.status !== 'Active' ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : 'style="white-space: nowrap; font-size: 11px; padding: 8px 14px;"'}>
-          Sign In as ${u.role.split(' ')[0]} &rarr;
+        <button class="btn-brand-outline btn-select-login-user" data-email="${u.email}" ${u.status !== 'Active' ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : 'style="white-space: nowrap; font-size: 11px; padding: 8px 14px; color: #fff; border-color: rgba(255,255,255,0.35);"'}>
+          Select Account &rarr;
         </button>
       </div>
     `).join('');
@@ -555,8 +569,8 @@ class OpsApp {
                   C
                 </div>
                 <div>
-                  <div style="font-size: 15px; font-weight: 800; color: #075545;">Civitas Governance Portal</div>
-                  <div style="font-size: 11px; color: #64748b;">Authorized Staff &amp; Executive Sign-In</div>
+                  <div style="font-size: 15px; font-weight: 800; color: #075545;">Civitas Governance Portal v2.1</div>
+                  <div style="font-size: 11px; color: #64748b;">Authenticated Staff &amp; Executive Sign-In</div>
                 </div>
               </div>
               <button id="btnLoginBackToLanding" class="btn-brand-outline" style="font-size: 11px; padding: 5px 10px;">
@@ -568,7 +582,7 @@ class OpsApp {
               Sign In to Operations Dashboard
             </h2>
             <p style="font-size: 12px; color: #64748b; margin: 0 0 20px 0;">
-              All actions performed in your session are logged in the immutable governance audit trail under your user identity.
+              Individual authentication required. Sessions expire after 30 minutes of inactivity and lock after 5 failed attempts.
             </p>
 
             ${this.loginError ? `
@@ -580,19 +594,16 @@ class OpsApp {
             <form id="formStaffLogin">
               <div style="margin-bottom: 16px;">
                 <label style="display: block; font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px;">
-                  Staff Email or User Account *
+                  Staff Email or User ID *
                 </label>
-                <input type="text" id="loginEmailInput" required value="admin@civitasestate.com" placeholder="e.g. admin@civitasestate.com" style="width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px;">
+                <input type="text" id="loginEmailInput" required value="admin@civitasestate.com" placeholder="e.g. admin@civitasestate.com or U0001" style="width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; box-sizing: border-box;">
               </div>
 
               <div style="margin-bottom: 20px;">
                 <label style="display: block; font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px;">
-                  Security PIN / Passcode *
+                  Personal Security Passcode / PIN *
                 </label>
-                <input type="password" id="loginPinInput" required value="2026" placeholder="Enter 4-digit security PIN" style="width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px;">
-                <p style="font-size: 11px; color: #64748b; margin-top: 6px;">
-                  Default Executive PIN for <code>admin@civitasestate.com</code> is <strong>2026</strong>.
-                </p>
+                <input type="password" id="loginPinInput" required placeholder="Enter your personal security passcode" autocomplete="current-password" style="width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; box-sizing: border-box;">
               </div>
 
               <button type="submit" class="btn-brand-primary" style="width: 100%; justify-content: center; padding: 12px; font-size: 14px;">
@@ -600,23 +611,32 @@ class OpsApp {
               </button>
             </form>
 
-            <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #64748b;">
-              <span>Segregation of Duties: <strong>Active</strong></span>
-              <span>Session Audit Trail: <strong>Enabled</strong></span>
+            <div style="margin-top: 16px; padding-top: 14px; border-top: 1px dashed #cbd5e1; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+              <div style="font-size: 11px; color: #475569;">
+                <strong>Evaluation / Training:</strong> Launch isolated Demo Sandbox (separate from production records).
+              </div>
+              <button type="button" id="btnLaunchIsolatedDemo" class="btn-brand-outline" style="white-space: nowrap; font-size: 11px; padding: 6px 12px;">
+                🧪 Enter Demo Sandbox
+              </button>
+            </div>
+
+            <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #64748b;">
+              <span>Brute-Force Lockout: <strong>5 Attempts</strong></span>
+              <span>Hash Chain Audit Trail: <strong>Active</strong></span>
             </div>
           </div>
 
-          <!-- Right: Interactive Role-Based Governance Access -->
+          <!-- Right: Registered Governance Directory -->
           <div style="display: flex; flex-direction: column; justify-content: space-between;">
             <div>
               <div class="landing-pill" style="margin-bottom: 10px;">
                 Role-Based Access Control (RBAC)
               </div>
               <h3 style="font-size: 20px; font-weight: 800; color: #ffffff; margin: 0 0 6px 0;">
-                Select a Governance Role to Sign In
+                Registered Staff &amp; Governance Accounts
               </h3>
               <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 16px 0;">
-                Click any active staff account below to immediately sign in and test role-specific permissions, approval thresholds, and audit controls:
+                Select your account below and enter your personal security passcode on the left. Credentials are salted and hashed (never displayed in plaintext):
               </p>
 
               <div style="display: flex; flex-direction: column; gap: 10px;">
@@ -625,7 +645,7 @@ class OpsApp {
             </div>
 
             <div style="margin-top: 18px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 12px 16px; color: #e2e8f0; font-size: 11px;">
-              <strong style="color: #fed7aa;">Governance Control Note:</strong> Only the <strong>Founder / CEO</strong> can approve expenses above GH₵${state.settings.spendingApprovalThreshold}, lock monthly accounting periods, or register/suspend staff accounts.
+              <strong style="color: #fed7aa;">Governance Control Note:</strong> Only the <strong>Founder / CEO</strong> can approve expenses above GH₵${state.settings.spendingApprovalThreshold}, lock or reopen monthly accounting periods, or manage staff accounts.
             </div>
           </div>
         </div>
@@ -643,7 +663,7 @@ class OpsApp {
     });
 
     document.getElementById('btnHeroDemoLogin')?.addEventListener('click', () => {
-      opsStore.loadState(createDemoState());
+      opsStore.setDemoSandboxMode(true, createDemoState);
       opsStore.loginAsUser('U0001');
       this.setScreen('dashboard');
     });
@@ -658,6 +678,7 @@ class OpsApp {
       ev.preventDefault();
       const emailOrId = (document.getElementById('loginEmailInput') as HTMLInputElement).value;
       const pin = (document.getElementById('loginPinInput') as HTMLInputElement).value;
+      opsStore.setDemoSandboxMode(false);
       const res = opsStore.authenticateUser(emailOrId, pin);
       if (!res.success) {
         this.loginError = res.error || 'Authentication failed';
@@ -668,14 +689,24 @@ class OpsApp {
       this.setScreen('dashboard');
     });
 
-    this.mountEl.querySelectorAll<HTMLButtonElement>('.btn-quick-role-login').forEach(btn => {
+    document.getElementById('btnLaunchIsolatedDemo')?.addEventListener('click', () => {
+      opsStore.setDemoSandboxMode(true, createDemoState);
+      opsStore.loginAsUser('U0001');
+      this.loginError = '';
+      this.setScreen('dashboard');
+    });
+
+    this.mountEl.querySelectorAll<HTMLButtonElement>('.btn-select-login-user').forEach(btn => {
       btn.addEventListener('click', () => {
-        const uid = btn.dataset.userid;
-        if (!uid) return;
-        const user = opsStore.loginAsUser(uid);
-        if (user) {
-          this.loginError = '';
-          this.setScreen('dashboard');
+        const email = btn.dataset.email;
+        const emailInput = document.getElementById('loginEmailInput') as HTMLInputElement | null;
+        const pinInput = document.getElementById('loginPinInput') as HTMLInputElement | null;
+        if (email && emailInput) {
+          emailInput.value = email;
+          if (pinInput) {
+            pinInput.value = '';
+            pinInput.focus();
+          }
         }
       });
     });
@@ -714,19 +745,19 @@ class OpsApp {
         <td>${u.department}</td>
         <td>${u.email}</td>
         <td>${u.phone}</td>
-        <td style="font-family: monospace; font-weight: 700;">${isCEO ? u.pinCode : '••••'}</td>
+        <td style="font-family: monospace; font-size: 11px; color: #15803d;">🔒 Salted Hash</td>
         <td style="font-size: 11px; color: #64748b;">${u.lastLogin || 'Never'}</td>
         <td>
           <span class="ops-badge ${u.status === 'Active' ? 'badge-ok' : 'badge-attention'}">${u.status}</span>
         </td>
         <td style="white-space: nowrap;">
-          ${u.status === 'Active' && currentUser?.userId !== u.userId ? `
+          ${opsStore.isDemoMode() && u.status === 'Active' && currentUser?.userId !== u.userId ? `
             <button class="btn-brand-outline btn-switch-to-user" data-id="${u.userId}" style="padding: 3px 8px; font-size: 11px;">
-              Switch To Role
+              Sandbox Switch
             </button>
           ` : ''}
           ${isCEO && u.userId !== 'U0001' ? `
-            <button class="btn-brand-outline btn-toggle-user-status" data-id="${u.userId}" style="padding: 3px 8px; font-size: 11px; color: ${u.status === 'Active' ? '#b91c1c' : '#15803d'}; margin-left: 4px;">
+            <button class="btn-brand-outline btn-toggle-user-status" data-id="${u.userId}" data-status="${u.status}" style="padding: 3px 8px; font-size: 11px; color: ${u.status === 'Active' ? '#b91c1c' : '#15803d'}; margin-left: 4px;">
               ${u.status === 'Active' ? 'Suspend' : 'Activate'}
             </button>
           ` : ''}
@@ -741,7 +772,7 @@ class OpsApp {
         <td style="font-weight: 600;">${e.supplier}</td>
         <td>${e.category}</td>
         <td style="text-align: right; font-weight: 800; color: #b91c1c;">${currency}${roundMoney(e.amount).toFixed(2)}</td>
-        <td>${e.fundingSource}</td>
+        <td>${e.submittedBy || 'Staff'}</td>
         <td style="font-family: monospace; font-size: 11px;">${e.evidenceReference || 'Missing'}</td>
         <td><span class="ops-badge badge-attention">Pending CEO Approval (&gt; ${currency}${state.settings.spendingApprovalThreshold})</span></td>
         <td style="white-space: nowrap;">
@@ -761,30 +792,39 @@ class OpsApp {
       <tr>
         <td style="font-weight: 700; color: #075545;">${p.month}</td>
         <td><span class="ops-badge ${p.status === 'Closed' ? 'badge-ok' : 'badge-pending'}">${p.status}</span></td>
-        <td style="font-weight: 600;">${p.closedBy || '-'}</td>
+        <td style="font-weight: 600;">${p.closedBy || '-'}${p.reopenedBy ? `<div style="font-size:10px; color:#b45309;">Reopened by ${p.reopenedBy}: ${p.reopenReason}</div>` : ''}</td>
         <td>${p.closedDate || '-'}</td>
         <td style="text-align: center;">${p.invoicesAtClose ?? 0} &rarr; ${p.invoicesNow ?? 0}</td>
         <td style="text-align: center;">${p.paymentsAtClose ?? 0} &rarr; ${p.paymentsNow ?? 0}</td>
         <td style="text-align: center;">${p.expensesAtClose ?? 0} &rarr; ${p.expensesNow ?? 0}</td>
         <td style="text-align: center;">${p.assignmentsAtClose ?? 0} &rarr; ${p.assignmentsNow ?? 0}</td>
         <td>
-          ${p.changedFlag ? `<span class="ops-badge badge-attention">${p.changedFlag}</span>` : `<span class="ops-badge badge-ok">Verified Intact</span>`}
+          ${p.changedFlag ? `<span class="ops-badge badge-attention">${p.changedFlag}</span>` : `<span class="ops-badge badge-ok">Protected &amp; Intact</span>`}
+          ${isCEO && p.status === 'Closed' ? `
+            <button class="btn-brand-outline btn-reopen-period" data-month="${p.month}" style="padding: 2px 8px; font-size: 10px; margin-left: 6px; color: #b45309; border-color: #fcd34d;">
+              🔓 Reopen
+            </button>
+          ` : ''}
         </td>
       </tr>
     `).join('');
 
-    const auditRowsHtml = (state.auditLogs || []).slice(0, 30).map(log => `
+    const auditIntegrity = opsStore.verifyAuditTrailIntegrity();
+    const auditRowsHtml = (state.auditLogs || []).slice(0, 50).map(log => `
       <tr>
         <td style="font-family: monospace; font-size: 11px; color: #64748b;">${log.timestamp.replace('T', ' ').substring(0, 19)}</td>
-        <td style="font-weight: 700; color: #075545;">${log.actor}</td>
+        <td style="font-weight: 700; color: #075545;">${log.actor} <span style="font-size:10px; color:#64748b;">(${log.userId || 'SYS'})</span></td>
         <td>
-          <span class="ops-badge ${log.action === 'APPROVE' || log.action === 'CREATE' ? 'badge-ok' : log.action === 'REJECT' || log.action === 'DELETE' ? 'badge-attention' : log.action === 'CLOSE_PERIOD' ? 'badge-reconciled' : 'badge-pending'}">
+          <span class="ops-badge ${log.action === 'APPROVE' || log.action === 'CREATE' ? 'badge-ok' : log.action === 'REJECT' || log.action === 'DELETE' || log.action === 'SECURITY_ALERT' || log.action === 'LOGIN_FAILED' ? 'badge-attention' : log.action === 'CLOSE_PERIOD' ? 'badge-reconciled' : 'badge-pending'}">
             ${log.action}
           </span>
         </td>
         <td style="font-weight: 600;">${log.entity}</td>
         <td style="font-family: monospace;">${log.entityId}</td>
-        <td style="font-size: 12px; color: #334155;">${log.details || '-'}</td>
+        <td style="font-size: 12px; color: #334155;">
+          ${log.details || '-'}
+          ${log.entryHash ? `<span style="font-family:monospace; font-size:10px; color:#94a3b8; margin-left:6px;">[${log.entryHash.slice(0, 14)}]</span>` : ''}
+        </td>
       </tr>
     `).join('');
 
@@ -815,7 +855,9 @@ class OpsApp {
         <div class="ops-card">
           <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Audit Trail Events</p>
           <h3 style="font-size: 24px; font-weight: 800; color: #1e293b; margin: 0;">${state.auditLogs.length} Logged</h3>
-          <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Immutable actor &amp; timestamp log</p>
+          <p style="font-size: 11px; color: ${auditIntegrity.valid ? '#15803d' : '#b91c1c'}; font-weight: 600; margin: 4px 0 0 0;">
+            ${auditIntegrity.valid ? '✓ Hash Chain Verified (Unlimited Retention)' : '⚠️ Hash Chain Alert'}
+          </p>
         </div>
       </div>
 
@@ -1057,9 +1099,14 @@ class OpsApp {
     );
 
     const jobsBooked = state.jobs.length;
+    const jobsInProgress = state.jobs.filter(j => ['Scheduled', 'Assigned', 'In progress', 'Quality inspection'].includes(j.status)).length;
     const jobsCompleted = state.jobs.filter(j => ['Accepted by customer', 'Invoiced', 'Paid', 'Closed'].includes(j.status)).length;
     const jobsOverdue = state.jobs.filter(j => j.overdueFlag === 'Overdue').length;
     const contractorDays = state.assignments.reduce((s, a) => s + (a.personDays || 0), 0);
+    const unpaidContractorPay = roundMoney(state.assignments.reduce((s, a) => s + (a.unpaidAmount || 0), 0));
+    const acceptedQuotesCount = state.quotes.filter(q => q.status === 'Accepted').length;
+    const quoteConversionRate = state.quotes.length > 0 ? Math.round((acceptedQuotesCount / state.quotes.length) * 100) : 0;
+    const recurringClients = state.customers.filter(c => (c.jobs || 0) > 1 || c.category === 'Diaspora owner' || c.category === 'Property manager').length;
 
     const alertRowsHtml = evaluation.alerts.map(a => `
       <tr>
@@ -1076,9 +1123,40 @@ class OpsApp {
     `).join('');
 
     return `
+      <!-- 3 Core Management Pulse Questions Banner (Phase 7) -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 24px;">
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 5px solid #075545; border-radius: 8px; padding: 14px 16px;">
+          <div style="font-size: 11px; font-weight: 800; color: #075545; text-transform: uppercase;">Q1: Are We Getting Customers?</div>
+          <div style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 4px 0;">
+            ${enqCount} Enquiries &bull; ${quoteConversionRate}% Quote Conversion
+          </div>
+          <div style="font-size: 11px; color: #475569;">
+            Active Quotes: <strong>${currency}${openQuoteVal.toFixed(2)}</strong> &bull; Recurring / Portfolio Clients: <strong>${recurringClients}</strong>
+          </div>
+        </div>
+        <div style="background: #fff7ed; border: 1px solid #fed7aa; border-left: 5px solid #FF5800; border-radius: 8px; padding: 14px 16px;">
+          <div style="font-size: 11px; font-weight: 800; color: #9a3412; text-transform: uppercase;">Q2: Are We Completing Profitable Jobs?</div>
+          <div style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 4px 0;">
+            ${jobsCompleted}/${jobsBooked} Completed &bull; ${mgmt.yearTotal.contributionMargin ? Math.round(mgmt.yearTotal.contributionMargin * 100) : 0}% Gross Margin
+          </div>
+          <div style="font-size: 11px; color: #475569;">
+            In Progress: <strong>${jobsInProgress}</strong> &bull; Gross Profit: <strong>${currency}${grossContr.toFixed(2)}</strong> (Target &ge; 35%)
+          </div>
+        </div>
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-left: 5px solid #1d4ed8; border-radius: 8px; padding: 14px 16px;">
+          <div style="font-size: 11px; font-weight: 800; color: #1e40af; text-transform: uppercase;">Q3: Are We Collecting Enough Cash to Operate?</div>
+          <div style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 4px 0;">
+            ${currency}${cashRec.toFixed(2)} Collected &bull; ${currency}${cashBal.toFixed(2)} Cash
+          </div>
+          <div style="font-size: 11px; color: #475569;">
+            Receivables Due: <strong>${currency}${receivables.toFixed(2)}</strong> &bull; Contractor Pay Due: <strong>${currency}${unpaidContractorPay.toFixed(2)}</strong>
+          </div>
+        </div>
+      </div>
+
       <!-- Top Row: Money Overview -->
       <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0 0 14px 0; letter-spacing: 0.5px;">
-        1. Financial &amp; Cash Flow Overview
+        1. Financial &amp; Cash Flow Overview (${state.settings.reportingYear} YTD)
       </h2>
       <div class="ops-kpi-grid">
         <div class="ops-card">
@@ -1222,13 +1300,21 @@ class OpsApp {
     };
 
     return `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
         <div>
-          <h2 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0;">12-Month Management Accounts</h2>
+          <h2 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0;">12-Month Management Accounts (${state.settings.reportingYear})</h2>
           <p style="font-size: 12px; color: var(--text-muted); margin: 2px 0 0 0;">
-            Reporting Year ${state.settings.reportingYear}. Built from verified transaction registers.
+            Reconciled from operational sub-ledgers (Invoices, Receipts, Assignments, Expenses, and Assets).
           </p>
         </div>
+        <div style="display: flex; align-items: center; gap: 8px; background: #f8fafc; border: 1px solid #cbd5e1; padding: 6px 12px; border-radius: 6px; font-size: 11px;">
+          <span style="font-weight: 700; color: #075545;">GRA Tax Configuration:</span>
+          <span>Apply Tax: <strong>${state.settings.applyTax}</strong> (${Math.round((state.settings.taxRate || 0) * 100)}%)</span>
+        </div>
+      </div>
+
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #075545; padding: 10px 14px; border-radius: 6px; margin-bottom: 18px; font-size: 11px; color: #334155;">
+        <strong>Accounting Basis &amp; Scope Disclosure:</strong> Revenue is recognized on an accrual basis from issued Tax Invoices net of credit notes (Quotations are never recognized as revenue). Cash Flow is tracked strictly on a cash basis by payment date. These statements represent <em>Transaction-Reconciled Operational Management Accounts</em>; statutory year-end IFRS financial statements and GRA tax filings (VAT/NHIL/GETFund/Withholding Tax) should be reviewed by a Chartered Accountant (ICAG).
       </div>
 
       <div class="ops-table-container" style="margin-bottom: 24px;">
@@ -1507,7 +1593,13 @@ class OpsApp {
         <td>${e.leadSource}</td>
         <td>${e.serviceInterest || 'N/A'}</td>
         <td><span class="ops-badge ${e.stage === 'Accepted' ? 'badge-ok' : e.stage === 'Declined' ? 'badge-attention' : 'badge-pending'}">${e.stage}</span></td>
-        <td>${e.quoteId || '-'}</td>
+        <td style="white-space: nowrap;">
+          ${e.quoteId ? `<span style="font-weight: 700; color: #075545;">${e.quoteId}</span>` : `
+            <button class="btn-brand-outline btn-convert-enq-quote" data-id="${e.enquiryId}" style="padding: 2px 8px; font-size: 10px; color: #075545; border-color: #075545;">
+              &rarr; Create Quote
+            </button>
+          `}
+        </td>
       </tr>
     `).join('');
 
@@ -1522,6 +1614,11 @@ class OpsApp {
         <td style="text-align: center; font-weight: 600;">${q.marginPct ? Math.round(q.marginPct * 100) : 0}%</td>
         <td><span class="ops-badge ${q.status === 'Accepted' ? 'badge-ok' : q.status === 'Declined' ? 'badge-attention' : 'badge-pending'}">${q.status}</span></td>
         <td style="white-space: nowrap;">
+          ${q.status === 'Sent' || q.status === 'Draft' ? `
+            <button class="btn-brand-primary btn-approve-quote-job" data-id="${q.quoteId}" style="padding: 3px 8px; font-size: 10px; margin-right: 4px;">
+              ✓ Approve &amp; Book Job
+            </button>
+          ` : ''}
           <button class="btn-brand-outline btn-print-quote" data-id="${q.quoteId}" style="padding: 3px 8px; font-size: 11px;">
             Print / PDF
           </button>
@@ -1630,13 +1727,20 @@ class OpsApp {
         <td style="font-size: 12px;">${j.description || 'Job service'}</td>
         <td>${j.scheduledDate || 'TBD'}</td>
         <td>${j.effectiveDueDate || 'TBD'}</td>
-        <td><span class="ops-badge ${['Accepted by customer', 'Closed', 'Paid'].includes(j.status) ? 'badge-ok' : j.status === 'Cancelled' ? 'badge-attention' : 'badge-pending'}">${j.status}</span></td>
+        <td><span class="ops-badge ${['Accepted by customer', 'Closed', 'Paid', 'Invoiced'].includes(j.status) ? 'badge-ok' : j.status === 'Cancelled' ? 'badge-attention' : 'badge-pending'}">${j.status}</span></td>
         <td style="text-align: right;">${currency}${roundMoney(j.quotedAmount || 0).toFixed(2)}</td>
         <td style="text-align: right; color: #64748b;">${currency}${roundMoney(j.actualDirectCost || 0).toFixed(2)}</td>
-        <td style="text-align: right; font-weight: 700; color: (j.jobContribution || 0) >= 0 ? '#15803d' : '#b91c1c';">
+        <td style="text-align: right; font-weight: 700; color: ${(j.jobContribution || 0) >= 0 ? '#15803d' : '#b91c1c'};">
           ${j.jobContribution != null ? `${currency}${roundMoney(j.jobContribution).toFixed(2)}` : '-'}
         </td>
-        <td>${j.overdueFlag ? `<span class="ops-badge badge-attention">Overdue</span>` : ''}</td>
+        <td style="white-space: nowrap;">
+          ${j.overdueFlag ? `<span class="ops-badge badge-attention">Overdue</span>` : ''}
+          ${!['Invoiced', 'Paid', 'Closed', 'Cancelled'].includes(j.status) ? `
+            <button class="btn-brand-primary btn-complete-job-invoice" data-id="${j.jobId}" style="padding: 2px 8px; font-size: 10px;">
+              ✓ Complete &amp; Invoice
+            </button>
+          ` : `<span style="font-size: 11px; color: #15803d; font-weight: 600;">Billed</span>`}
+        </td>
       </tr>
     `).join('');
 
@@ -1807,6 +1911,11 @@ class OpsApp {
         <td style="text-align: center; font-weight: 600;">${a.personDays || 0}</td>
         <td style="white-space: nowrap;">
           <span class="ops-badge ${a.paymentStatus === 'Paid' ? 'badge-ok' : 'badge-attention'}">${a.paymentStatus}</span>
+          ${a.paymentStatus === 'Unpaid' && opsStore.canCurrentUser('PAY_EXPENSE_OR_CONTRACTOR') ? `
+            <button class="btn-brand-primary btn-pay-assignment" data-id="${a.assignmentId}" style="padding: 2px 6px; font-size: 10px; margin-left: 4px;">
+              ₵ Pay Artisan
+            </button>
+          ` : ''}
           <button class="btn-brand-outline btn-whatsapp-assign" data-id="${a.assignmentId}" style="padding: 2px 6px; font-size: 10px; color: #16a34a; border-color: rgba(22, 163, 74, 0.4); margin-left: 4px;" title="Dispatch assignment to artisan via WhatsApp">
             Dispatch
           </button>
@@ -1896,7 +2005,14 @@ class OpsApp {
         <td><span class="ops-badge ${e.class === 'Direct' ? 'badge-ok' : e.class === 'Capex' ? 'badge-reconciled' : 'badge-pending'}">${e.class}</span></td>
         <td>${e.jobId || '-'}</td>
         <td style="text-align: right; font-weight: 700;">${currency}${roundMoney(e.amount).toFixed(2)}</td>
-        <td>${e.paymentStatus}</td>
+        <td>
+          <span class="ops-badge ${e.paymentStatus === 'Paid' ? 'badge-ok' : 'badge-pending'}">${e.paymentStatus}</span>
+          ${e.paymentStatus === 'Unpaid' && (e.approvalStatus === 'Approved' || e.approvalStatus === 'Not required') && opsStore.canCurrentUser('PAY_EXPENSE_OR_CONTRACTOR') ? `
+            <button class="btn-brand-outline btn-pay-expense" data-id="${e.expenseId}" style="padding: 2px 6px; font-size: 9px; margin-left: 4px;">
+              ₵ Pay
+            </button>
+          ` : ''}
+        </td>
         <td>
           <span class="ops-badge ${e.approvalStatus === 'Approved' ? 'badge-ok' : e.approvalStatus === 'Not required' ? 'badge-reconciled' : 'badge-attention'}">${e.approvalStatus}</span>
           ${e.approvalStatus === 'Pending' && isCEO ? `
@@ -1964,9 +2080,46 @@ class OpsApp {
       </tr>
     `).join('');
 
+    const fundingRowsHtml = state.funding.map(f => `
+      <tr>
+        <td style="font-weight: 700; color: #075545;">${f.fundingId}</td>
+        <td style="font-weight: 600;">${f.source}</td>
+        <td>${f.description}</td>
+        <td><span class="ops-badge ${f.status === 'Received' ? 'badge-ok' : 'badge-pending'}">${f.status} (Planning Scenario)</span></td>
+        <td style="text-align: right;">${currency}${roundMoney(f.amountRequested).toFixed(2)}</td>
+        <td style="text-align: right;">${currency}${roundMoney(f.amountApproved).toFixed(2)}</td>
+        <td style="text-align: right; font-weight: 800; color: #15803d;">${currency}${roundMoney(f.amountReceived).toFixed(2)}</td>
+      </tr>
+    `).join('');
+
     return `
       <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0 0 8px 0;">
-        NEIP Grant Funding Request &amp; Utilisation (${currency}80,000 Budget)
+        1. Capital &amp; Grant Planning Scenarios vs. Actual Cash Received
+      </h2>
+      <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 12px 0;">
+        Planning references (${currency}80,000 NEIP Grant Request &amp; ${currency}18,000 Pre-Funding Founder Capital) are strictly separated from actual cash received (${currency}0.00).
+      </p>
+      <div class="ops-table-container" style="margin-bottom: 28px;">
+        <table class="ops-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Funding Source</th>
+              <th>Scenario Description</th>
+              <th>Status</th>
+              <th style="text-align: right;">Planned / Requested</th>
+              <th style="text-align: right;">Approved</th>
+              <th style="text-align: right;">Actual Cash Received</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fundingRowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0 0 8px 0;">
+        2. NEIP Grant Funding Allocation &amp; Utilisation (${currency}80,000 Budget)
       </h2>
       <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">
         Funding requested or approved is NOT cash. The working capital reserve (Category H) is held as cash and is not an operating expense.
@@ -2341,15 +2494,18 @@ class OpsApp {
         try {
           const content = event.target?.result as string;
           const parsed = JSON.parse(content);
-          if (!parsed.settings || !Array.isArray(parsed.customers)) {
-            throw new Error('Invalid Civitas database backup file format.');
+          const validation = opsStore.validateDataset(parsed);
+          if (!validation.valid) {
+            throw new Error(validation.errors.join('\n'));
           }
-          if (confirm('Are you sure you want to restore this backup? This will overwrite the current active database.')) {
-            opsStore.loadState(parsed, 'Founder/CEO');
-            alert('Database successfully restored from backup.');
+          const warnMsg = validation.warnings.length > 0 ? `\n\nWarnings:\n- ${validation.warnings.join('\n- ')}` : '';
+          const summaryMsg = `Validated Backup Summary:\n• Customers: ${validation.summary.customerCount}\n• Jobs: ${validation.summary.jobCount}\n• Invoices: ${validation.summary.invoiceCount} (Net Revenue: GH₵${validation.summary.totalInvoicedNet.toFixed(2)})\n• Cash Receipts: GH₵${validation.summary.totalCashCollected.toFixed(2)}\n• Expenses: GH₵${validation.summary.totalExpenses.toFixed(2)}${warnMsg}\n\nRestore this backup now? (Existing audit history will be preserved.)`;
+          if (confirm(summaryMsg)) {
+            opsStore.loadState(parsed, opsStore.getActorLabel());
+            alert('Database successfully validated and restored from backup.');
           }
         } catch (err: any) {
-          alert('Failed to import backup: ' + (err?.message || 'Invalid JSON file'));
+          alert('Failed to import backup:\n' + (err?.message || 'Invalid JSON file'));
         } finally {
           if (inputImport) inputImport.value = '';
         }
@@ -2379,10 +2535,26 @@ class OpsApp {
       this.setScreen('login');
     });
 
+    document.getElementById('btnToggleSandboxMode')?.addEventListener('click', () => {
+      if (opsStore.isDemoMode()) {
+        opsStore.setDemoSandboxMode(false);
+        opsStore.logout('Exited Demo Sandbox Mode');
+        this.setScreen('login');
+      } else {
+        opsStore.setDemoSandboxMode(true, createDemoState);
+        opsStore.loginAsUser('U0001');
+        this.render();
+      }
+    });
+
     const quickSwitchSelect = document.getElementById('selectQuickSwitchUser') as HTMLSelectElement | null;
     quickSwitchSelect?.addEventListener('change', () => {
       if (quickSwitchSelect.value) {
-        opsStore.loginAsUser(quickSwitchSelect.value);
+        try {
+          opsStore.loginAsUser(quickSwitchSelect.value);
+        } catch (err: any) {
+          alert(err?.message || 'Role switch blocked.');
+        }
       }
     });
 
@@ -2390,7 +2562,13 @@ class OpsApp {
       const btn = el as HTMLElement;
       btn.addEventListener('click', () => {
         const userId = btn.dataset.id;
-        if (userId) opsStore.loginAsUser(userId);
+        if (userId) {
+          try {
+            opsStore.loginAsUser(userId);
+          } catch (err: any) {
+            alert(err?.message || 'Role switch blocked.');
+          }
+        }
       });
     });
 
@@ -2401,7 +2579,11 @@ class OpsApp {
         const currentStatus = btn.dataset.status;
         if (!userId) return;
         const nextStatus = currentStatus === 'Active' ? 'Suspended' : 'Active';
-        opsStore.updateUser(userId, { status: nextStatus as any });
+        try {
+          opsStore.updateUser(userId, { status: nextStatus as any });
+        } catch (err: any) {
+          alert(err?.message || 'Failed to update user status.');
+        }
       });
     });
 
@@ -2409,7 +2591,13 @@ class OpsApp {
       const btn = el as HTMLElement;
       btn.addEventListener('click', () => {
         const expId = btn.dataset.id;
-        if (expId) opsStore.approveExpense(expId);
+        if (expId) {
+          try {
+            opsStore.approveExpense(expId);
+          } catch (err: any) {
+            alert(err?.message || 'Failed to approve expense.');
+          }
+        }
       });
     });
 
@@ -2417,7 +2605,15 @@ class OpsApp {
       const btn = el as HTMLElement;
       btn.addEventListener('click', () => {
         const expId = btn.dataset.id;
-        if (expId) opsStore.rejectExpense(expId);
+        if (expId) {
+          const reason = prompt(`Enter reason for rejecting Expense ${expId}:`, 'Insufficient supporting documentation');
+          if (!reason) return;
+          try {
+            opsStore.rejectExpense(expId, reason);
+          } catch (err: any) {
+            alert(err?.message || 'Failed to reject expense.');
+          }
+        }
       });
     });
 
@@ -2425,9 +2621,101 @@ class OpsApp {
       const monthSelect = document.getElementById('selectCloseMonth') as HTMLSelectElement | null;
       const monthVal = monthSelect?.value;
       if (!monthVal) return;
-      if (confirm(`Lock and close accounting period ${monthVal}? Any modifications to ${monthVal} records after this timestamp will trigger Control Check #51.`)) {
-        opsStore.closePeriod(monthVal, opsStore.getActorLabel());
+      if (confirm(`Lock and close accounting period ${monthVal}? Once closed, transactions in ${monthVal} cannot be added or modified without an authorized reopen.`)) {
+        try {
+          opsStore.closePeriod(monthVal, opsStore.getActorLabel());
+        } catch (err: any) {
+          alert(err?.message || 'Failed to close accounting period.');
+        }
       }
+    });
+
+    document.querySelectorAll('.btn-reopen-period').forEach((el) => {
+      const btn = el as HTMLElement;
+      btn.addEventListener('click', () => {
+        const monthVal = btn.dataset.month;
+        if (!monthVal) return;
+        const reason = prompt(`Enter documented business reason to reopen closed accounting period ${monthVal} (minimum 5 characters):`);
+        if (!reason) return;
+        try {
+          opsStore.reopenPeriod(monthVal, reason);
+        } catch (err: any) {
+          alert(err?.message || 'Failed to reopen period.');
+        }
+      });
+    });
+
+    // Streamlined Operations Workflow (Phase 6: 1-Click Progression)
+    document.querySelectorAll('.btn-convert-enq-quote').forEach((el) => {
+      const btn = el as HTMLElement;
+      btn.addEventListener('click', () => {
+        const enqId = btn.dataset.id;
+        if (!enqId) return;
+        try {
+          const quote = opsStore.convertEnquiryToQuote(enqId);
+          alert(`Created Quotation ${quote.quoteId} from Enquiry ${enqId}.`);
+        } catch (err: any) {
+          alert(err?.message || 'Failed to convert enquiry to quotation.');
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-approve-quote-job').forEach((el) => {
+      const btn = el as HTMLElement;
+      btn.addEventListener('click', () => {
+        const quoteId = btn.dataset.id;
+        if (!quoteId) return;
+        try {
+          const job = opsStore.approveQuoteAndCreateJob(quoteId);
+          alert(`Approved Quotation ${quoteId} and scheduled Job ${job.jobId}.`);
+        } catch (err: any) {
+          alert(err?.message || 'Failed to approve quote and schedule job.');
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-complete-job-invoice').forEach((el) => {
+      const btn = el as HTMLElement;
+      btn.addEventListener('click', () => {
+        const jobId = btn.dataset.id;
+        if (!jobId) return;
+        try {
+          const inv = opsStore.completeJobAndGenerateInvoice(jobId);
+          alert(`Marked Job ${jobId} complete and generated Tax Invoice ${inv.invoiceNo} for GH₵${inv.amountBeforeTax.toFixed(2)}.`);
+        } catch (err: any) {
+          alert(err?.message || 'Failed to complete job and generate invoice.');
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-pay-assignment').forEach((el) => {
+      const btn = el as HTMLElement;
+      btn.addEventListener('click', () => {
+        const asnId = btn.dataset.id;
+        if (!asnId) return;
+        const ref = prompt(`Enter Mobile Money / Bank reference for paying Contractor Assignment ${asnId}:`, `MOMO-ASN-${asnId}`);
+        if (!ref) return;
+        try {
+          opsStore.payContractorAssignment(asnId, 'Mobile money', ref);
+        } catch (err: any) {
+          alert(err?.message || 'Failed to settle contractor assignment.');
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-pay-expense').forEach((el) => {
+      const btn = el as HTMLElement;
+      btn.addEventListener('click', () => {
+        const expId = btn.dataset.id;
+        if (!expId) return;
+        const ref = prompt(`Enter payment reference for Expense ${expId}:`, `MOMO-EXP-${expId}`);
+        if (!ref) return;
+        try {
+          opsStore.markExpensePaid(expId, 'Mobile money', ref);
+        } catch (err: any) {
+          alert(err?.message || 'Failed to mark expense paid.');
+        }
+      });
     });
 
     // Print triggers

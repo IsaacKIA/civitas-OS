@@ -17,7 +17,7 @@ export type PropUse = 'Owner-occupied' | 'Rented out' | 'Short-let' | 'Vacant' |
 export type Division = 'Civitas Fix' | 'Civitas Care' | 'Civitas Property Watch';
 export type DivisionShared = Division | 'Shared overhead';
 export type QuoteStatus = 'Draft' | 'Sent' | 'Accepted' | 'Declined' | 'Expired';
-export type ApprovalStatus = 'Not required' | 'Pending' | 'Approved' | 'Rejected';
+export type ApprovalStatus = 'Draft' | 'Submitted' | 'Not required' | 'Pending' | 'Approved' | 'Rejected';
 export type JobStatus = 'Requested' | 'Assessed' | 'Approved' | 'Scheduled' | 'Assigned' | 'In progress' | 'Quality inspection' | 'Accepted by customer' | 'Invoiced' | 'Paid' | 'Closed' | 'Cancelled';
 export type QualityResult = 'Pass' | 'Pass after rework' | 'Fail' | 'Not inspected';
 export type WorkerType = 'Independent contractor' | 'Temporary worker' | 'Salaried employee';
@@ -423,7 +423,14 @@ export interface Expense {
   paymentMethod: PayMethod;
   paymentStatus: PayStatus;
   approvalStatus: ApprovalStatus;
+  submittedBy?: string;
+  submittedAt?: string;
   approvedBy?: string;
+  approvedAt?: string;
+  paidDate?: string;
+  paymentReference?: string;
+  rejectionReason?: string;
+  selfApprovalOverrideReason?: string;
   evidenceReference?: string;
   fundingSource?: FundingSource;
   grantCategory?: GrantCategoryName;
@@ -779,6 +786,9 @@ export interface PeriodCloseRecord {
   expensesAtClose?: number;
   assignmentsAtClose?: number;
   openCheckItemsAtClose?: number;
+  reopenedBy?: string;
+  reopenedDate?: string;
+  reopenReason?: string;
   // Calculated:
   invoicesNow?: number;
   paymentsNow?: number;
@@ -903,7 +913,10 @@ export interface SystemUser {
   phone: string;
   role: UserRole;
   department: UserDepartment;
-  pinCode: string;
+  pinCode?: string; // Legacy migration field only; stripped after hashing
+  passwordHash?: string; // Salted SHA-256 credential digest
+  failedLoginAttempts?: number;
+  lockedUntil?: string;
   status: UserStatus;
   createdDate: string; // YYYY-MM-DD
   lastLogin?: string;

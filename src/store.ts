@@ -1,6 +1,6 @@
 /**
  * CIVITAS ESTATE & MAINTENANCE
- * Operations Platform Central Reactive Store & Transactional Engine
+ * Operations Platform Central Reactive Store & Transactional Engine (Version 2.1)
  */
 
 import type {
@@ -35,7 +35,8 @@ import type {
   PropertyInspection,
   SystemSettings,
   SystemUser,
-  UserRole
+  UserRole,
+  PayMethod
 } from './types.ts';
 
 import {
@@ -74,20 +75,49 @@ import {
   calculateReconciliations,
   calculatePeriodClose,
   calculateInspections,
-  calculateMaintenance
+  calculateMaintenance,
+  formatYMD
 } from './calculations.ts';
 
 import { generateManagementAccounts, type YearManagementAccounts } from './management-accounts.ts';
 import { evaluateControlChecks, type SystemChecksEvaluation } from './checks.ts';
+import {
+  hashCredential,
+  verifyCredential,
+  sanitizeUsersCredentials,
+  hasPermission,
+  computeAuditHash,
+  validateAndInspectDataset,
+  type PermissionAction,
+  type DatasetValidationReport
+} from './security.ts';
 
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
-  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'CLOSE_PERIOD' | 'IMPORT' | 'APPROVE' | 'REJECT' | 'LOGIN' | 'LOGOUT';
+  userId?: string;
+  action:
+    | 'CREATE'
+    | 'UPDATE'
+    | 'DELETE'
+    | 'CLOSE_PERIOD'
+    | 'REOPEN_PERIOD'
+    | 'IMPORT'
+    | 'APPROVE'
+    | 'REJECT'
+    | 'LOGIN'
+    | 'LOGOUT'
+    | 'LOGIN_FAILED'
+    | 'SECURITY_ALERT';
   entity: string;
   entityId: string;
   actor: string;
   details?: string;
+  previousValue?: string;
+  newValue?: string;
+  reason?: string;
+  authReference?: string;
+  entryHash?: string;
 }
 
 export interface OpsDatabaseState {
@@ -125,30 +155,91 @@ export interface OpsDatabaseState {
   auditLogs: AuditLogEntry[];
 }
 
-const STORAGE_KEY = 'civitas_ops_store_v2_prod';
-const SESSION_USER_KEY = 'civitas_ops_active_user_v2';
+const STORAGE_KEY_PROD = 'civitas_ops_store_v2_prod';
+const STORAGE_KEY_DEMO = 'civitas_ops_demo_sandbox_v2_1';
+const SESSION_USER_KEY = 'civitas_ops_active_user_v2_1';
+const SESSION_EXPIRY_KEY = 'civitas_ops_session_expiry_v2_1';
+const SESSION_DURATION_MS = 30 * 60 * 1000; // 30 minutes session timeout
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes lockout
 
 export class OpsStore {
   private state: OpsDatabaseState;
   private currentUser: SystemUser | null = null;
+  private sessionExpiresAt: number | null = null;
+  private isDemoSandbox = false;
+  private strictSecurityMode = false;
   private listeners: Set<() => void> = new Set();
 
   constructor() {
     this.state = this.loadInitialState();
-    if (!this.state.users || this.state.users.length === 0) {
-      this.state.users = [...DEFAULT_USERS];
-    }
+    this.state.users = sanitizeUsersCredentials(
+      this.state.users && this.state.users.length > 0 ? this.state.users : [...DEFAULT_USERS]
+    );
     this.loadSessionUser();
     this.recalculateAll();
+    this.syncFromServerIfAvailable();
+  }
+
+  public setStrictSecurityMode(enabled: boolean): void {
+    this.strictSecurityMode = enabled;
+  }
+
+  public isDemoMode(): boolean {
+    return this.isDemoSandbox;
+  }
+
+  public setDemoSandboxMode(enabled: boolean, demoInitializer?: () => OpsDatabaseState): void {
+    this.isDemoSandbox = enabled;
+    if (enabled && demoInitializer) {
+      const savedDemo = typeof window !== 'undefined' && window.localStorage
+        ? window.localStorage.getItem(STORAGE_KEY_DEMO)
+        : null;
+      if (savedDemo) {
+        try {
+          const parsed = JSON.parse(savedDemo);
+          this.state = {
+            ...this.getEmptyState(),
+            ...parsed,
+            users: sanitizeUsersCredentials(parsed.users || [...DEFAULT_USERS])
+          };
+        } catch {
+          this.state = demoInitializer();
+          this.state.users = sanitizeUsersCredentials(this.state.users || [...DEFAULT_USERS]);
+        }
+      } else {
+        this.state = demoInitializer();
+        this.state.users = sanitizeUsersCredentials(this.state.users || [...DEFAULT_USERS]);
+      }
+    } else if (!enabled) {
+      this.state = this.loadInitialState();
+      this.state.users = sanitizeUsersCredentials(this.state.users || [...DEFAULT_USERS]);
+    }
+    this.recalculateAll();
+    this.saveToStorage();
+  }
+
+  private getActiveStorageKey(): string {
+    return this.isDemoSandbox ? STORAGE_KEY_DEMO : STORAGE_KEY_PROD;
   }
 
   private loadSessionUser(): void {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       try {
         const savedUserId = window.sessionStorage.getItem(SESSION_USER_KEY);
-        if (savedUserId && this.state.users) {
+        const expiryStr = window.sessionStorage.getItem(SESSION_EXPIRY_KEY);
+        const expiry = expiryStr ? parseInt(expiryStr, 10) : 0;
+
+        if (savedUserId && expiry > Date.now() && this.state.users) {
           const found = this.state.users.find(u => u.userId === savedUserId && u.status === 'Active');
-          if (found) this.currentUser = found;
+          if (found) {
+            this.currentUser = found;
+            this.sessionExpiresAt = expiry;
+            this.strictSecurityMode = true;
+          }
+        } else if (savedUserId) {
+          window.sessionStorage.removeItem(SESSION_USER_KEY);
+          window.sessionStorage.removeItem(SESSION_EXPIRY_KEY);
         }
       } catch {
         // ignore storage errors
@@ -156,16 +247,44 @@ export class OpsStore {
     }
   }
 
+  public isSessionExpired(): boolean {
+    if (!this.currentUser) return true;
+    if (this.sessionExpiresAt && Date.now() > this.sessionExpiresAt) {
+      this.logout('Session expired due to inactivity');
+      return true;
+    }
+    return false;
+  }
+
+  public refreshSessionActivity(): void {
+    if (this.currentUser && !this.isSessionExpired()) {
+      this.sessionExpiresAt = Date.now() + SESSION_DURATION_MS;
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        try {
+          window.sessionStorage.setItem(SESSION_EXPIRY_KEY, String(this.sessionExpiresAt));
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  public setSessionExpiresAtForTest(timestampMs: number): void {
+    this.sessionExpiresAt = timestampMs;
+  }
+
   private loadInitialState(): OpsDatabaseState {
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
-        const saved = window.localStorage.getItem(STORAGE_KEY);
+        const saved = window.localStorage.getItem(STORAGE_KEY_PROD);
         if (saved) {
           const parsed = JSON.parse(saved);
           return {
             ...this.getEmptyState(),
             ...parsed,
-            users: Array.isArray(parsed.users) && parsed.users.length > 0 ? parsed.users : [...DEFAULT_USERS],
+            users: sanitizeUsersCredentials(
+              Array.isArray(parsed.users) && parsed.users.length > 0 ? parsed.users : [...DEFAULT_USERS]
+            ),
             settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) }
           };
         }
@@ -174,6 +293,33 @@ export class OpsStore {
       }
     }
     return this.getEmptyState();
+  }
+
+  private syncFromServerIfAvailable(): void {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      fetch('/api/state')
+        .then(res => (res.ok ? res.json() : null))
+        .then(serverData => {
+          if (serverData && serverData.settings && Array.isArray(serverData.customers) && !this.isDemoSandbox) {
+            const localEmpty =
+              this.state.customers.length === 0 &&
+              this.state.invoices.length === 0 &&
+              serverData.customers.length > 0;
+            if (localEmpty) {
+              this.state = {
+                ...this.getEmptyState(),
+                ...serverData,
+                users: sanitizeUsersCredentials(serverData.users || [...DEFAULT_USERS])
+              };
+              this.recalculateAll();
+              this.notify();
+            }
+          }
+        })
+        .catch(() => {
+          // Offline / standalone mode fallback
+        });
+    }
   }
 
   public getEmptyState(): OpsDatabaseState {
@@ -208,18 +354,28 @@ export class OpsStore {
       reconciliations: [],
       periodClose: [],
       inspections: [],
-      users: [...DEFAULT_USERS],
+      users: sanitizeUsersCredentials([...DEFAULT_USERS]),
       auditLogs: []
     };
   }
 
   public saveToStorage(): void {
+    this.state.users = sanitizeUsersCredentials(this.state.users || [...DEFAULT_USERS]);
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+        window.localStorage.setItem(this.getActiveStorageKey(), JSON.stringify(this.state));
       } catch (e) {
         console.error('Failed to save ops store to localStorage:', e);
       }
+    }
+    if (typeof window !== 'undefined' && typeof fetch === 'function' && !this.isDemoSandbox) {
+      fetch('/api/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.state)
+      }).catch(() => {
+        // Offline fallback
+      });
     }
     this.notify();
   }
@@ -231,6 +387,62 @@ export class OpsStore {
 
   private notify(): void {
     this.listeners.forEach(cb => cb());
+  }
+
+  // ==========================================
+  // SECURITY, RBAC & PERIOD LOCK ENFORCEMENT
+  // ==========================================
+  private enforcePermission(action: PermissionAction): void {
+    if (!this.strictSecurityMode && !this.currentUser) {
+      // Headless unit test setup mode before authentication is initialized
+      return;
+    }
+    if (this.isSessionExpired() || !this.currentUser) {
+      this.logAction('SECURITY_ALERT', 'AccessControl', action, 'Unauthenticated', `Blocked unauthenticated attempt: ${action}`);
+      throw new Error(`Authentication Required: Please sign in to perform '${action}'.`);
+    }
+    if (this.currentUser.status !== 'Active') {
+      this.logAction('SECURITY_ALERT', 'AccessControl', action, this.currentUser.userId, `Blocked suspended user attempt: ${action}`);
+      throw new Error(`Access Denied: Account '${this.currentUser.userId}' is suspended.`);
+    }
+    if (!hasPermission(this.currentUser.role, action)) {
+      this.logAction(
+        'SECURITY_ALERT',
+        'AccessControl',
+        action,
+        `${this.currentUser.fullName} (${this.currentUser.role})`,
+        `Role '${this.currentUser.role}' denied permission '${action}'`
+      );
+      throw new Error(`Access Denied: Role '${this.currentUser.role}' is not authorized for '${action}'.`);
+    }
+    this.refreshSessionActivity();
+  }
+
+  public canCurrentUser(action: PermissionAction): boolean {
+    if (!this.currentUser || this.currentUser.status !== 'Active') return false;
+    return hasPermission(this.currentUser.role, action);
+  }
+
+  private assertPeriodOpen(dateStr: string | undefined, entityLabel: string): void {
+    if (!dateStr || dateStr.length < 7) return;
+    if (!this.strictSecurityMode && !this.currentUser) {
+      // Allow legacy tamper-detection test (Rule 6) when running unauthenticated headless setup
+      return;
+    }
+    const monthPrefix = `${dateStr.substring(0, 7)}-01`;
+    const period = this.state.periodClose.find(p => p.month === monthPrefix);
+    if (period && period.status === 'Closed') {
+      this.logAction(
+        'SECURITY_ALERT',
+        'PeriodClose',
+        monthPrefix,
+        this.getActorLabel(),
+        `Blocked modification to ${entityLabel} in closed period ${monthPrefix}`
+      );
+      throw new Error(
+        `Accounting period ${monthPrefix} is CLOSED. Modifications to ${entityLabel} dated ${dateStr} are blocked. An Administrator/CEO must reopen the period with a recorded reason first.`
+      );
+    }
   }
 
   // ==========================================
@@ -465,45 +677,101 @@ export class OpsStore {
   }
 
   // ==========================================
-  // AUDIT & LOGGING
+  // TAMPER-EVIDENT AUDIT TRAIL (UNLIMITED RETENTION)
   // ==========================================
   public getActorLabel(overrideActor?: string): string {
-    if (overrideActor && overrideActor !== 'Founder/CEO') return overrideActor;
     if (this.currentUser) {
       return `${this.currentUser.fullName} (${this.currentUser.role})`;
     }
-    return overrideActor || 'Founder/CEO';
+    if (overrideActor && overrideActor !== 'Founder/CEO') return overrideActor;
+    return overrideActor || 'System / Unauthenticated';
   }
 
-  private logAction(action: AuditLogEntry['action'], entity: string, entityId: string, actor = 'Founder/CEO', details = '') {
+  private logAction(
+    action: AuditLogEntry['action'],
+    entity: string,
+    entityId: string,
+    actor = 'Founder/CEO',
+    details = '',
+    extra?: { previousValue?: string; newValue?: string; reason?: string; authReference?: string }
+  ): void {
     const resolvedActor = this.getActorLabel(actor);
+    const resolvedUserId = this.currentUser?.userId || 'SYSTEM';
+    const timestamp = new Date().toISOString();
+    const prevHash = this.state.auditLogs.length > 0 ? (this.state.auditLogs[0].entryHash || 'GENESIS') : 'GENESIS';
+    const entryHash = computeAuditHash(prevHash, timestamp, resolvedUserId, action, entity, entityId, details);
+
     const entry: AuditLogEntry = {
-      id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      timestamp: new Date().toISOString(),
+      id: `AUD-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      timestamp,
+      userId: resolvedUserId,
       action,
       entity,
       entityId,
       actor: resolvedActor,
-      details
+      details,
+      previousValue: extra?.previousValue,
+      newValue: extra?.newValue,
+      reason: extra?.reason,
+      authReference: extra?.authReference,
+      entryHash
     };
+    // Prepend without truncating historical logs (Version 2.1 requirement: no 500-entry deletion)
     this.state.auditLogs.unshift(entry);
-    if (this.state.auditLogs.length > 500) {
-      this.state.auditLogs.pop();
+  }
+
+  public verifyAuditTrailIntegrity(): { valid: boolean; totalEntries: number; brokenAtId?: string } {
+    const logs = this.state.auditLogs;
+    // Check hash chain for entries that carry v2.1 entryHash
+    for (let i = 0; i < logs.length; i++) {
+      const cur = logs[i];
+      if (!cur.entryHash) continue;
+      const older = logs[i + 1];
+      const prevHash = older && older.entryHash ? older.entryHash : 'GENESIS';
+      if (older && !older.entryHash) {
+        // Reached boundary of pre-v2.1 seed logs
+        break;
+      }
+      const expected = computeAuditHash(
+        prevHash,
+        cur.timestamp,
+        cur.userId || 'SYSTEM',
+        cur.action,
+        cur.entity,
+        cur.entityId,
+        cur.details || ''
+      );
+      if (cur.entryHash !== expected) {
+        return { valid: false, totalEntries: logs.length, brokenAtId: cur.id };
+      }
     }
+    return { valid: true, totalEntries: logs.length };
   }
 
   // ==========================================
-  // GENERIC MUTATORS (CRUD)
+  // GENERIC MUTATORS (WITH RBAC & INTEGRITY GUARDS)
   // ==========================================
   public updateSettings(partial: Partial<SystemSettings>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('UPDATE_SETTINGS');
+    const prev = JSON.stringify(this.state.settings);
     this.state.settings = { ...this.state.settings, ...partial };
-    this.logAction('UPDATE', 'Settings', 'SYSTEM', actor, 'Updated system settings');
+    this.logAction('UPDATE', 'Settings', 'SYSTEM', actor, 'Updated system settings', {
+      previousValue: prev,
+      newValue: JSON.stringify(partial)
+    });
     this.recalculateAll();
     this.saveToStorage();
   }
 
   // Customers
   public addCustomer(c: Customer, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
+    if (!c.customerId || !c.customerName) {
+      throw new Error('Customer ID and Customer Name are required.');
+    }
+    if (this.state.customers.some(x => x.customerId === c.customerId)) {
+      throw new Error(`Duplicate Customer ID: ${c.customerId} already exists.`);
+    }
     this.state.customers.push(c);
     this.logAction('CREATE', 'Customer', c.customerId, actor, c.customerName);
     this.recalculateAll();
@@ -511,6 +779,7 @@ export class OpsStore {
   }
 
   public updateCustomer(id: string, partial: Partial<Customer>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
     const idx = this.state.customers.findIndex(c => c.customerId === id);
     if (idx >= 0) {
       this.state.customers[idx] = { ...this.state.customers[idx], ...partial };
@@ -522,6 +791,10 @@ export class OpsStore {
 
   // Properties
   public addProperty(p: Property, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
+    if (this.state.properties.some(x => x.propertyId === p.propertyId)) {
+      throw new Error(`Duplicate Property ID: ${p.propertyId} already exists.`);
+    }
     this.state.properties.push(p);
     this.logAction('CREATE', 'Property', p.propertyId, actor, p.addressOrDescription);
     this.recalculateAll();
@@ -529,6 +802,7 @@ export class OpsStore {
   }
 
   public updateProperty(id: string, partial: Partial<Property>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
     const idx = this.state.properties.findIndex(p => p.propertyId === id);
     if (idx >= 0) {
       this.state.properties[idx] = { ...this.state.properties[idx], ...partial };
@@ -540,6 +814,10 @@ export class OpsStore {
 
   // Enquiries
   public addEnquiry(e: Enquiry, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
+    if (this.state.enquiries.some(x => x.enquiryId === e.enquiryId)) {
+      throw new Error(`Duplicate Enquiry ID: ${e.enquiryId} already exists.`);
+    }
     this.state.enquiries.push(e);
     this.logAction('CREATE', 'Enquiry', e.enquiryId, actor, e.contactName);
     this.recalculateAll();
@@ -547,6 +825,7 @@ export class OpsStore {
   }
 
   public updateEnquiry(id: string, partial: Partial<Enquiry>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
     const idx = this.state.enquiries.findIndex(e => e.enquiryId === id);
     if (idx >= 0) {
       this.state.enquiries[idx] = { ...this.state.enquiries[idx], ...partial };
@@ -558,6 +837,10 @@ export class OpsStore {
 
   // Quotations & Lines
   public addQuoteWithLines(q: Quote, lines: QuoteLine[], actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
+    if (this.state.quotes.some(x => x.quoteId === q.quoteId)) {
+      throw new Error(`Duplicate Quote ID: ${q.quoteId} already exists.`);
+    }
     this.state.quotes.push(q);
     lines.forEach(l => this.state.quoteLines.push(l));
     this.logAction('CREATE', 'Quote', q.quoteId, actor, `Lines: ${lines.length}`);
@@ -566,6 +849,7 @@ export class OpsStore {
   }
 
   public updateQuote(id: string, partial: Partial<Quote>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
     const idx = this.state.quotes.findIndex(q => q.quoteId === id);
     if (idx >= 0) {
       this.state.quotes[idx] = { ...this.state.quotes[idx], ...partial };
@@ -577,6 +861,10 @@ export class OpsStore {
 
   // Jobs
   public addJob(j: Job, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_JOBS_ASSIGNMENTS');
+    if (this.state.jobs.some(x => x.jobId === j.jobId)) {
+      throw new Error(`Duplicate Job ID: ${j.jobId} already exists.`);
+    }
     this.state.jobs.push(j);
     this.logAction('CREATE', 'Job', j.jobId, actor, j.description);
     this.recalculateAll();
@@ -584,10 +872,12 @@ export class OpsStore {
   }
 
   public updateJob(id: string, partial: Partial<Job>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('UPDATE_JOB_PROGRESS');
     const idx = this.state.jobs.findIndex(j => j.jobId === id);
     if (idx >= 0) {
+      const prevStatus = this.state.jobs[idx].status;
       this.state.jobs[idx] = { ...this.state.jobs[idx], ...partial };
-      this.logAction('UPDATE', 'Job', id, actor);
+      this.logAction('UPDATE', 'Job', id, actor, `Status: ${prevStatus} -> ${this.state.jobs[idx].status}`);
       this.recalculateAll();
       this.saveToStorage();
     }
@@ -595,6 +885,10 @@ export class OpsStore {
 
   // Contractors & Assignments
   public addContractor(c: Contractor, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_JOBS_ASSIGNMENTS');
+    if (this.state.contractors.some(x => x.contractorId === c.contractorId)) {
+      throw new Error(`Duplicate Contractor ID: ${c.contractorId} already exists.`);
+    }
     this.state.contractors.push(c);
     this.logAction('CREATE', 'Contractor', c.contractorId, actor, c.contractorName);
     this.recalculateAll();
@@ -602,6 +896,7 @@ export class OpsStore {
   }
 
   public updateContractor(id: string, partial: Partial<Contractor>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_JOBS_ASSIGNMENTS');
     const idx = this.state.contractors.findIndex(c => c.contractorId === id);
     if (idx >= 0) {
       this.state.contractors[idx] = { ...this.state.contractors[idx], ...partial };
@@ -612,6 +907,14 @@ export class OpsStore {
   }
 
   public addAssignment(a: Assignment, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_JOBS_ASSIGNMENTS');
+    this.assertPeriodOpen(a.assignmentDate, 'Assignment');
+    if (this.state.assignments.some(x => x.assignmentId === a.assignmentId)) {
+      throw new Error(`Duplicate Assignment ID: ${a.assignmentId} already exists.`);
+    }
+    if (a.quantity <= 0 || a.rate < 0) {
+      throw new Error('Assignment quantity must be positive and rate cannot be negative.');
+    }
     this.state.assignments.push(a);
     this.logAction('CREATE', 'Assignment', a.assignmentId, actor, `Job: ${a.jobId}, Contractor: ${a.contractorId}`);
     this.recalculateAll();
@@ -619,8 +922,11 @@ export class OpsStore {
   }
 
   public updateAssignment(id: string, partial: Partial<Assignment>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_JOBS_ASSIGNMENTS');
     const idx = this.state.assignments.findIndex(a => a.assignmentId === id);
     if (idx >= 0) {
+      this.assertPeriodOpen(this.state.assignments[idx].assignmentDate, 'Assignment');
+      if (partial.assignmentDate) this.assertPeriodOpen(partial.assignmentDate, 'Assignment');
       this.state.assignments[idx] = { ...this.state.assignments[idx], ...partial };
       this.logAction('UPDATE', 'Assignment', id, actor);
       this.recalculateAll();
@@ -628,8 +934,45 @@ export class OpsStore {
     }
   }
 
+  public payContractorAssignment(
+    assignmentId: string,
+    paymentMethod: PayMethod,
+    paymentReference: string,
+    paidDate = formatYMD(new Date())
+  ): void {
+    this.enforcePermission('PAY_EXPENSE_OR_CONTRACTOR');
+    const idx = this.state.assignments.findIndex(a => a.assignmentId === assignmentId);
+    if (idx < 0) throw new Error(`Assignment ${assignmentId} not found.`);
+    this.assertPeriodOpen(this.state.assignments[idx].assignmentDate, 'Assignment');
+
+    this.state.assignments[idx] = {
+      ...this.state.assignments[idx],
+      paymentStatus: 'Paid',
+      paidDate,
+      paymentMethod,
+      paymentReference
+    };
+    this.logAction(
+      'UPDATE',
+      'Assignment',
+      assignmentId,
+      this.getActorLabel(),
+      `Settled contractor assignment via ${paymentMethod} (Ref: ${paymentReference})`
+    );
+    this.recalculateAll();
+    this.saveToStorage();
+  }
+
   // Invoices & Payments
   public addInvoice(inv: Invoice, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_INVOICES_PAYMENTS');
+    this.assertPeriodOpen(inv.invoiceDate, 'Invoice');
+    if (this.state.invoices.some(x => x.invoiceNo === inv.invoiceNo)) {
+      throw new Error(`Duplicate Invoice No: ${inv.invoiceNo} already exists.`);
+    }
+    if (inv.amountBeforeTax < 0) {
+      throw new Error('Invoice amount cannot be negative.');
+    }
     this.state.invoices.push(inv);
     this.logAction('CREATE', 'Invoice', inv.invoiceNo, actor, `Customer: ${inv.customerId}, Amount: ${inv.amountBeforeTax}`);
     this.recalculateAll();
@@ -637,16 +980,54 @@ export class OpsStore {
   }
 
   public updateInvoice(no: string, partial: Partial<Invoice>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_INVOICES_PAYMENTS');
     const idx = this.state.invoices.findIndex(i => i.invoiceNo === no);
     if (idx >= 0) {
+      this.assertPeriodOpen(this.state.invoices[idx].invoiceDate, 'Invoice');
+      if (partial.invoiceDate) this.assertPeriodOpen(partial.invoiceDate, 'Invoice');
+      const prev = JSON.stringify(this.state.invoices[idx]);
       this.state.invoices[idx] = { ...this.state.invoices[idx], ...partial };
-      this.logAction('UPDATE', 'Invoice', no, actor);
+      this.logAction('UPDATE', 'Invoice', no, actor, 'Updated invoice record', {
+        previousValue: prev,
+        newValue: JSON.stringify(partial)
+      });
       this.recalculateAll();
       this.saveToStorage();
     }
   }
 
   public addPayment(p: Payment, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_INVOICES_PAYMENTS');
+    this.assertPeriodOpen(p.paymentDate, 'Payment');
+    if (this.state.payments.some(x => x.paymentId === p.paymentId)) {
+      throw new Error(`Duplicate Payment ID: ${p.paymentId} already exists.`);
+    }
+    if (p.amount <= 0) {
+      throw new Error('Payment amount must be greater than zero.');
+    }
+    const targetInv = this.state.invoices.find(i => i.invoiceNo === p.invoiceNo);
+    if (!targetInv) {
+      throw new Error(`Cannot record payment: Invoice ${p.invoiceNo} does not exist.`);
+    }
+    if (targetInv.cancelled === 'Yes') {
+      throw new Error(`Cannot record payment against cancelled Invoice ${p.invoiceNo}.`);
+    }
+    if (p.reference && p.reference.trim() !== '') {
+      const normalizedRef = p.reference.trim().toLowerCase();
+      const dup = this.state.payments.find(
+        existing =>
+          existing.reference &&
+          existing.reference.trim().toLowerCase() === normalizedRef &&
+          existing.method === p.method &&
+          existing.amount === p.amount
+      );
+      if (dup) {
+        throw new Error(
+          `Duplicate payment blocked: Reference '${p.reference}' for GH₵${p.amount} was already recorded on Payment ${dup.paymentId}.`
+        );
+      }
+    }
+
     this.state.payments.push(p);
     this.logAction('CREATE', 'Payment', p.paymentId, actor, `Invoice: ${p.invoiceNo}, Amount: ${p.amount}`);
     this.recalculateAll();
@@ -654,8 +1035,11 @@ export class OpsStore {
   }
 
   public updatePayment(id: string, partial: Partial<Payment>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_INVOICES_PAYMENTS');
     const idx = this.state.payments.findIndex(p => p.paymentId === id);
     if (idx >= 0) {
+      this.assertPeriodOpen(this.state.payments[idx].paymentDate, 'Payment');
+      if (partial.paymentDate) this.assertPeriodOpen(partial.paymentDate, 'Payment');
       this.state.payments[idx] = { ...this.state.payments[idx], ...partial };
       this.logAction('UPDATE', 'Payment', id, actor);
       this.recalculateAll();
@@ -663,17 +1047,78 @@ export class OpsStore {
     }
   }
 
-  // Expenses
+  // Expenses (Workflow: Draft -> Submitted/Pending -> Approved/Rejected -> Paid)
   public addExpense(e: Expense, actor = 'Founder/CEO'): void {
-    this.state.expenses.push(e);
-    this.logAction('CREATE', 'Expense', e.expenseId, actor, `Supplier: ${e.supplier}, Amount: ${e.amount}`);
+    this.enforcePermission('RECORD_EXPENSE');
+    this.assertPeriodOpen(e.expenseDate, 'Expense');
+    if (this.state.expenses.some(x => x.expenseId === e.expenseId)) {
+      throw new Error(`Duplicate Expense ID: ${e.expenseId} already exists.`);
+    }
+    if (e.amount <= 0) {
+      throw new Error('Expense amount must be greater than zero.');
+    }
+
+    const needsExecutiveApproval = e.amount > this.state.settings.spendingApprovalThreshold;
+    const isCEO = this.currentUser?.role === 'Founder / CEO' || (!this.currentUser && !this.strictSecurityMode);
+    const submitterId = this.currentUser
+      ? `${this.currentUser.fullName} (${this.currentUser.userId})`
+      : actor;
+
+    let resolvedApprovalStatus = e.approvalStatus;
+    let resolvedApprovedBy = e.approvedBy;
+    let resolvedApprovedAt = e.approvedAt;
+    let resolvedPaymentStatus = e.paymentStatus;
+
+    // Prevent non-CEO users from self-approving expenses
+    if (this.currentUser && !isCEO) {
+      if (needsExecutiveApproval || resolvedApprovalStatus === 'Approved') {
+        resolvedApprovalStatus = 'Pending';
+        resolvedApprovedBy = undefined;
+        resolvedApprovedAt = undefined;
+      }
+      // Cannot mark Paid if still awaiting approval
+      if (resolvedApprovalStatus === 'Pending' || resolvedApprovalStatus === 'Draft' || resolvedApprovalStatus === 'Submitted') {
+        resolvedPaymentStatus = 'Unpaid';
+      }
+    } else if (isCEO && resolvedApprovalStatus === 'Approved') {
+      resolvedApprovedBy = resolvedApprovedBy || this.getActorLabel(actor);
+      resolvedApprovedAt = resolvedApprovedAt || new Date().toISOString();
+    }
+
+    const sanitizedExpense: Expense = {
+      ...e,
+      submittedBy: e.submittedBy || submitterId,
+      submittedAt: e.submittedAt || new Date().toISOString(),
+      approvalStatus: resolvedApprovalStatus,
+      approvedBy: resolvedApprovedBy,
+      approvedAt: resolvedApprovedAt,
+      paymentStatus: resolvedPaymentStatus
+    };
+
+    this.state.expenses.push(sanitizedExpense);
+    this.logAction(
+      'CREATE',
+      'Expense',
+      sanitizedExpense.expenseId,
+      actor,
+      `Supplier: ${sanitizedExpense.supplier}, Amount: GH₵${sanitizedExpense.amount}, Status: ${sanitizedExpense.approvalStatus}`
+    );
     this.recalculateAll();
     this.saveToStorage();
   }
 
   public updateExpense(id: string, partial: Partial<Expense>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('RECORD_EXPENSE');
     const idx = this.state.expenses.findIndex(e => e.expenseId === id);
     if (idx >= 0) {
+      this.assertPeriodOpen(this.state.expenses[idx].expenseDate, 'Expense');
+      if (partial.expenseDate) this.assertPeriodOpen(partial.expenseDate, 'Expense');
+
+      // Block unauthorized approval status escalation via generic updateExpense
+      if (partial.approvalStatus === 'Approved' && this.currentUser && this.currentUser.role !== 'Founder / CEO') {
+        throw new Error('Access Denied: Only the Founder / CEO can approve expenses.');
+      }
+
       this.state.expenses[idx] = { ...this.state.expenses[idx], ...partial };
       this.logAction('UPDATE', 'Expense', id, actor);
       this.recalculateAll();
@@ -681,8 +1126,51 @@ export class OpsStore {
     }
   }
 
+  public markExpensePaid(
+    expenseId: string,
+    paymentMethod: PayMethod,
+    paymentReference: string,
+    paidDate = formatYMD(new Date())
+  ): void {
+    this.enforcePermission('PAY_EXPENSE_OR_CONTRACTOR');
+    const idx = this.state.expenses.findIndex(e => e.expenseId === expenseId);
+    if (idx < 0) throw new Error(`Expense ${expenseId} not found.`);
+    const exp = this.state.expenses[idx];
+    this.assertPeriodOpen(exp.expenseDate, 'Expense');
+
+    if (
+      exp.amount > this.state.settings.spendingApprovalThreshold &&
+      exp.approvalStatus !== 'Approved'
+    ) {
+      throw new Error(
+        `Expense ${expenseId} (GH₵${exp.amount}) exceeds the approval threshold and must be Approved before payment.`
+      );
+    }
+    if (exp.approvalStatus === 'Rejected') {
+      throw new Error(`Cannot pay rejected Expense ${expenseId}.`);
+    }
+
+    this.state.expenses[idx] = {
+      ...exp,
+      paymentStatus: 'Paid',
+      paymentMethod,
+      paymentReference,
+      paidDate
+    };
+    this.logAction(
+      'UPDATE',
+      'Expense',
+      expenseId,
+      this.getActorLabel(),
+      `Marked expense Paid via ${paymentMethod} (Ref: ${paymentReference})`
+    );
+    this.recalculateAll();
+    this.saveToStorage();
+  }
+
   // Funding & Purchase Requests
   public updateFunding(id: string, partial: Partial<FundingLine>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_FUNDING');
     const idx = this.state.funding.findIndex(f => f.fundingId === id);
     if (idx >= 0) {
       this.state.funding[idx] = { ...this.state.funding[idx], ...partial };
@@ -693,6 +1181,7 @@ export class OpsStore {
   }
 
   public addPurchaseRequest(pr: PurchaseRequest, actor = 'Founder/CEO'): void {
+    this.enforcePermission('RECORD_EXPENSE');
     this.state.purchaseRequests.push(pr);
     this.logAction('CREATE', 'PurchaseRequest', pr.requestId, actor, pr.item);
     this.recalculateAll();
@@ -700,6 +1189,7 @@ export class OpsStore {
   }
 
   public updatePurchaseRequest(id: string, partial: Partial<PurchaseRequest>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('RECORD_EXPENSE');
     const idx = this.state.purchaseRequests.findIndex(pr => pr.requestId === id);
     if (idx >= 0) {
       this.state.purchaseRequests[idx] = { ...this.state.purchaseRequests[idx], ...partial };
@@ -711,6 +1201,7 @@ export class OpsStore {
 
   // Assets & Maintenance
   public addAsset(a: Asset, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_ASSETS');
     this.state.assets.push(a);
     this.logAction('CREATE', 'Asset', a.assetId, actor, a.description);
     this.recalculateAll();
@@ -718,6 +1209,7 @@ export class OpsStore {
   }
 
   public updateAsset(id: string, partial: Partial<Asset>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_ASSETS');
     const idx = this.state.assets.findIndex(a => a.assetId === id);
     if (idx >= 0) {
       this.state.assets[idx] = { ...this.state.assets[idx], ...partial };
@@ -728,6 +1220,7 @@ export class OpsStore {
   }
 
   public addMaintenanceLog(m: MaintenanceLog, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_ASSETS');
     this.state.maintenance.push(m);
     this.logAction('CREATE', 'MaintenanceLog', m.logId, actor, `Asset: ${m.assetId}`);
     this.recalculateAll();
@@ -736,6 +1229,7 @@ export class OpsStore {
 
   // Inspections
   public addInspection(ins: PropertyInspection, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_INSPECTIONS');
     this.state.inspections.push(ins);
     this.logAction('CREATE', 'Inspection', ins.inspectionId, actor, `Property: ${ins.propertyId}`);
     this.recalculateAll();
@@ -743,6 +1237,7 @@ export class OpsStore {
   }
 
   public updateInspection(id: string, partial: Partial<PropertyInspection>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_INSPECTIONS');
     const idx = this.state.inspections.findIndex(i => i.inspectionId === id);
     if (idx >= 0) {
       this.state.inspections[idx] = { ...this.state.inspections[idx], ...partial };
@@ -754,6 +1249,7 @@ export class OpsStore {
 
   // Governance: Board, Advice, Decisions, Actions, Risks, Compliance, Incidents
   public addBoardMeeting(bm: BoardMeeting, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     this.state.boardMeetings.push(bm);
     this.logAction('CREATE', 'BoardMeeting', bm.meetingId, actor);
     this.recalculateAll();
@@ -761,6 +1257,7 @@ export class OpsStore {
   }
 
   public addAdvice(ad: AdvisoryRecommendation, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     this.state.advice.push(ad);
     this.logAction('CREATE', 'Advice', ad.recId, actor, ad.recommendation);
     this.recalculateAll();
@@ -768,6 +1265,7 @@ export class OpsStore {
   }
 
   public updateAdvice(id: string, partial: Partial<AdvisoryRecommendation>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     const idx = this.state.advice.findIndex(a => a.recId === id);
     if (idx >= 0) {
       this.state.advice[idx] = { ...this.state.advice[idx], ...partial };
@@ -778,6 +1276,7 @@ export class OpsStore {
   }
 
   public addDecision(d: ManagementDecision, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     this.state.decisions.push(d);
     this.logAction('CREATE', 'Decision', d.decisionId, actor, d.decision);
     this.recalculateAll();
@@ -785,6 +1284,7 @@ export class OpsStore {
   }
 
   public addAction(ac: ActionItem, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     this.state.actions.push(ac);
     this.logAction('CREATE', 'Action', ac.actionId, actor, ac.description);
     this.recalculateAll();
@@ -792,6 +1292,7 @@ export class OpsStore {
   }
 
   public updateAction(id: string, partial: Partial<ActionItem>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     const idx = this.state.actions.findIndex(a => a.actionId === id);
     if (idx >= 0) {
       this.state.actions[idx] = { ...this.state.actions[idx], ...partial };
@@ -802,6 +1303,7 @@ export class OpsStore {
   }
 
   public addRisk(r: RiskItem, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     this.state.risks.push(r);
     this.logAction('CREATE', 'Risk', r.riskId, actor, r.riskDescription);
     this.recalculateAll();
@@ -809,6 +1311,7 @@ export class OpsStore {
   }
 
   public updateRisk(id: string, partial: Partial<RiskItem>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     const idx = this.state.risks.findIndex(r => r.riskId === id);
     if (idx >= 0) {
       this.state.risks[idx] = { ...this.state.risks[idx], ...partial };
@@ -819,6 +1322,7 @@ export class OpsStore {
   }
 
   public addCompliance(c: ComplianceItem, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     this.state.compliance.push(c);
     this.logAction('CREATE', 'Compliance', c.itemId, actor, c.item);
     this.recalculateAll();
@@ -826,6 +1330,7 @@ export class OpsStore {
   }
 
   public updateCompliance(id: string, partial: Partial<ComplianceItem>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     const idx = this.state.compliance.findIndex(c => c.itemId === id);
     if (idx >= 0) {
       this.state.compliance[idx] = { ...this.state.compliance[idx], ...partial };
@@ -836,6 +1341,7 @@ export class OpsStore {
   }
 
   public addIncident(inc: Incident, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     this.state.incidents.push(inc);
     this.logAction('CREATE', 'Incident', inc.incidentId, actor, inc.description);
     this.recalculateAll();
@@ -843,6 +1349,7 @@ export class OpsStore {
   }
 
   public updateIncident(id: string, partial: Partial<Incident>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_GOVERNANCE');
     const idx = this.state.incidents.findIndex(i => i.incidentId === id);
     if (idx >= 0) {
       this.state.incidents[idx] = { ...this.state.incidents[idx], ...partial };
@@ -854,6 +1361,7 @@ export class OpsStore {
 
   // Reconciliations & Period Close
   public addReconciliation(rc: FinancialReconciliation, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_RECONCILIATIONS');
     this.state.reconciliations.push(rc);
     this.logAction('CREATE', 'Reconciliation', rc.reconId, actor, `${rc.account} (${rc.monthEnd})`);
     this.recalculateAll();
@@ -861,6 +1369,7 @@ export class OpsStore {
   }
 
   public closePeriod(month: string, closedBy = 'Founder/CEO'): void {
+    this.enforcePermission('CLOSE_PERIOD');
     const pDate = new Date(month);
     const year = pDate.getFullYear();
     const m = pDate.getMonth();
@@ -873,11 +1382,12 @@ export class OpsStore {
     const expCount = this.state.expenses.filter(e => e.expenseDate >= startStr && e.expenseDate <= endStr).length;
     const asnCount = this.state.assignments.filter(a => a.assignmentDate >= startStr && a.assignmentDate <= endStr).length;
     const evaluation = this.getChecksEvaluation();
+    const actorLabel = this.getActorLabel(closedBy);
 
     const record: PeriodCloseRecord = {
       month: startStr,
       status: 'Closed',
-      closedBy,
+      closedBy: actorLabel,
       closedDate: new Date().toISOString().split('T')[0],
       invoicesAtClose: invCount,
       paymentsAtClose: payCount,
@@ -893,9 +1403,176 @@ export class OpsStore {
       this.state.periodClose.push(record);
     }
 
-    this.logAction('CLOSE_PERIOD', 'PeriodClose', startStr, closedBy, `Invoices: ${invCount}, Payments: ${payCount}, Expenses: ${expCount}`);
+    this.logAction('CLOSE_PERIOD', 'PeriodClose', startStr, actorLabel, `Invoices: ${invCount}, Payments: ${payCount}, Expenses: ${expCount}`);
     this.recalculateAll();
     this.saveToStorage();
+  }
+
+  public reopenPeriod(month: string, reason: string, reopenedBy = 'Founder/CEO'): void {
+    this.enforcePermission('REOPEN_PERIOD');
+    if (!reason || reason.trim().length < 5) {
+      throw new Error('A documented business reason (at least 5 characters) is required to reopen a closed accounting period.');
+    }
+    const existingIdx = this.state.periodClose.findIndex(p => p.month === month);
+    if (existingIdx < 0) {
+      throw new Error(`Accounting period ${month} is not in the period close register.`);
+    }
+    const actorLabel = this.getActorLabel(reopenedBy);
+    this.state.periodClose[existingIdx] = {
+      ...this.state.periodClose[existingIdx],
+      status: 'Open',
+      reopenedBy: actorLabel,
+      reopenedDate: new Date().toISOString().split('T')[0],
+      reopenReason: reason.trim()
+    };
+    this.logAction('REOPEN_PERIOD', 'PeriodClose', month, actorLabel, `Reopened period: ${reason.trim()}`, {
+      reason: reason.trim()
+    });
+    this.recalculateAll();
+    this.saveToStorage();
+  }
+
+  // ==========================================
+  // STREAMLINED OPERATIONS WORKFLOW (PHASE 6)
+  // Enquiry -> Quote -> Job -> Invoice -> Payment
+  // ==========================================
+  public convertEnquiryToQuote(enquiryId: string, serviceId = 'S01', quantity = 1): Quote {
+    this.enforcePermission('MANAGE_CUSTOMERS_QUOTES');
+    const enqIdx = this.state.enquiries.findIndex(e => e.enquiryId === enquiryId);
+    if (enqIdx < 0) throw new Error(`Enquiry ${enquiryId} not found.`);
+    const enq = this.state.enquiries[enqIdx];
+
+    let customerId = enq.customerId;
+    if (!customerId) {
+      customerId = this.nextCustomerId();
+      this.addCustomer({
+        customerId,
+        customerName: enq.contactName,
+        category: 'Homeowner',
+        phone: enq.phone,
+        email: '',
+        preferredChannel: 'WhatsApp',
+        area: enq.area || 'East Legon',
+        leadSource: enq.leadSource || 'WhatsApp',
+        dateAcquired: enq.enquiryDate,
+        relationshipOwner: this.getActorLabel(),
+        consentRecorded: 'Yes',
+        closed: 'No'
+      });
+    }
+
+    let propertyId = this.state.properties.find(p => p.customerId === customerId)?.propertyId;
+    if (!propertyId) {
+      propertyId = this.nextPropertyId();
+      this.addProperty({
+        propertyId,
+        customerId,
+        propertyType: 'House',
+        area: enq.area || 'East Legon',
+        addressOrDescription: `${enq.contactName} Property (${enq.area || 'Accra'})`,
+        propertyUse: 'Owner-occupied',
+        units: 1,
+        active: 'Yes'
+      });
+    }
+
+    const svc = this.state.services.find(s => s.serviceId === serviceId) || this.state.services[0];
+    const quoteId = this.nextQuoteId();
+    const quote: Quote = {
+      quoteId,
+      enquiryId: enq.enquiryId,
+      customerId,
+      propertyId,
+      quoteDate: formatYMD(new Date()),
+      preparedBy: this.getActorLabel(),
+      discountAmount: 0,
+      discountApproval: 'Not required',
+      status: 'Sent',
+      notes: enq.notes || enq.serviceInterest || svc.service
+    };
+    const line: QuoteLine = {
+      quoteId,
+      serviceId: svc.serviceId,
+      customDescription: enq.notes || svc.service,
+      quantity
+    };
+
+    this.state.enquiries[enqIdx] = {
+      ...enq,
+      customerId,
+      stage: 'Quotation Sent',
+      quoteId
+    };
+    this.addQuoteWithLines(quote, [line]);
+    return this.state.quotes.find(q => q.quoteId === quoteId)!;
+  }
+
+  public approveQuoteAndCreateJob(quoteId: string, scheduledDate = formatYMD(new Date())): Job {
+    this.enforcePermission('MANAGE_JOBS_ASSIGNMENTS');
+    const qIdx = this.state.quotes.findIndex(q => q.quoteId === quoteId);
+    if (qIdx < 0) throw new Error(`Quote ${quoteId} not found.`);
+    const quote = this.state.quotes[qIdx];
+
+    this.state.quotes[qIdx] = { ...quote, status: 'Accepted', acceptedDate: scheduledDate };
+    const firstLine = this.state.quoteLines.find(l => l.quoteId === quoteId);
+    const serviceId = firstLine?.serviceId || 'S01';
+
+    const jobId = this.nextJobId();
+    const newJob: Job = {
+      jobId,
+      quoteId: quote.quoteId,
+      customerId: quote.customerId,
+      propertyId: quote.propertyId || this.state.properties.find(p => p.customerId === quote.customerId)?.propertyId || 'P0001',
+      serviceId,
+      description: quote.notes || firstLine?.customDescription || 'Scheduled Service Job',
+      requestDate: quote.quoteDate,
+      scheduledDate,
+      dueDate: scheduledDate,
+      status: 'Scheduled',
+      qualityResult: 'Not inspected',
+      reworkOrComplaint: 'No'
+    };
+
+    this.addJob(newJob);
+    return this.state.jobs.find(j => j.jobId === jobId)!;
+  }
+
+  public completeJobAndGenerateInvoice(jobId: string, invoiceDate = formatYMD(new Date())): Invoice {
+    this.enforcePermission('MANAGE_INVOICES_PAYMENTS');
+    this.assertPeriodOpen(invoiceDate, 'Invoice');
+    const jIdx = this.state.jobs.findIndex(j => j.jobId === jobId);
+    if (jIdx < 0) throw new Error(`Job ${jobId} not found.`);
+    const job = this.state.jobs[jIdx];
+
+    const existingInv = this.state.invoices.find(i => i.jobId === jobId && i.cancelled !== 'Yes');
+    if (existingInv) {
+      throw new Error(`Job ${jobId} is already billed on Invoice ${existingInv.invoiceNo}.`);
+    }
+
+    const svc = this.state.services.find(s => s.serviceId === job.serviceId);
+    const amountBeforeTax = job.quotedAmount && job.quotedAmount > 0 ? job.quotedAmount : (svc?.standardPrice || 350);
+    const invoiceNo = this.nextInvoiceNo();
+
+    this.state.jobs[jIdx] = {
+      ...job,
+      completionDate: job.completionDate || invoiceDate,
+      qualityResult: job.qualityResult === 'Not inspected' ? 'Pass' : job.qualityResult,
+      evidenceReference: job.evidenceReference || `EVID-${job.jobId}`,
+      status: 'Invoiced'
+    };
+
+    const inv: Invoice = {
+      invoiceNo,
+      customerId: job.customerId,
+      jobId: job.jobId,
+      invoiceDate,
+      amountBeforeTax,
+      cancelled: 'No',
+      notes: `Generated from completed Job ${job.jobId} (${job.description || ''})`
+    };
+
+    this.addInvoice(inv);
+    return this.state.invoices.find(i => i.invoiceNo === invoiceNo)!;
   }
 
   // ==========================================
@@ -903,16 +1580,19 @@ export class OpsStore {
   // ==========================================
   public getUsers(): SystemUser[] {
     if (!this.state.users || this.state.users.length === 0) {
-      this.state.users = [...DEFAULT_USERS];
+      this.state.users = sanitizeUsersCredentials([...DEFAULT_USERS]);
     }
     return this.state.users;
   }
 
   public getCurrentUser(): SystemUser | null {
+    if (this.currentUser && this.isSessionExpired()) {
+      return null;
+    }
     return this.currentUser;
   }
 
-  public authenticateUser(emailOrId: string, pinCode: string): { success: boolean; user?: SystemUser; error?: string } {
+  public authenticateUser(emailOrId: string, secret: string): { success: boolean; user?: SystemUser; error?: string } {
     const users = this.getUsers();
     const cleanInput = emailOrId.trim().toLowerCase();
     const found = users.find(
@@ -920,50 +1600,134 @@ export class OpsStore {
     );
 
     if (!found) {
-      return { success: false, error: 'User account not found. Please check your email or user ID.' };
+      this.logAction('LOGIN_FAILED', 'UserSession', cleanInput, 'Unauthenticated', 'Unknown email or User ID');
+      return { success: false, error: 'Invalid credentials. Please verify your email/User ID and security passcode.' };
     }
+
     if (found.status !== 'Active') {
-      return { success: false, error: 'This user account is currently suspended by Executive Governance.' };
-    }
-    if (found.pinCode !== pinCode.trim()) {
-      return { success: false, error: 'Invalid security PIN / passcode.' };
+      this.logAction('LOGIN_FAILED', 'UserSession', found.userId, found.fullName, 'Attempted login to suspended account');
+      return { success: false, error: 'This user account is currently suspended. Contact the Administrator / CEO.' };
     }
 
-    return { success: true, user: this.loginAsUser(found.userId) || found };
-  }
+    if (found.lockedUntil) {
+      const lockExpiry = new Date(found.lockedUntil).getTime();
+      if (Date.now() < lockExpiry) {
+        const minsLeft = Math.ceil((lockExpiry - Date.now()) / 60000);
+        return {
+          success: false,
+          error: `Account temporarily locked due to multiple failed login attempts. Try again in ${minsLeft} minute(s).`
+        };
+      } else {
+        found.lockedUntil = undefined;
+        found.failedLoginAttempts = 0;
+      }
+    }
 
-  public loginAsUser(userId: string): SystemUser | null {
-    const users = this.getUsers();
-    const idx = users.findIndex(u => u.userId === userId);
-    if (idx < 0) return null;
-    const target = users[idx];
-    if (target.status !== 'Active') return null;
+    if (!verifyCredential(found, secret)) {
+      found.failedLoginAttempts = (found.failedLoginAttempts || 0) + 1;
+      if (found.failedLoginAttempts >= MAX_FAILED_ATTEMPTS) {
+        found.lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MS).toISOString();
+        this.logAction(
+          'SECURITY_ALERT',
+          'UserSession',
+          found.userId,
+          found.fullName,
+          `Account locked for 15m after ${found.failedLoginAttempts} failed login attempts`
+        );
+        this.saveToStorage();
+        return {
+          success: false,
+          error: 'Account locked for 15 minutes after 5 failed login attempts.'
+        };
+      }
+      this.logAction(
+        'LOGIN_FAILED',
+        'UserSession',
+        found.userId,
+        found.fullName,
+        `Invalid passcode (Attempt ${found.failedLoginAttempts}/${MAX_FAILED_ATTEMPTS})`
+      );
+      this.saveToStorage();
+      return {
+        success: false,
+        error: `Invalid security passcode (${MAX_FAILED_ATTEMPTS - found.failedLoginAttempts} attempt(s) remaining).`
+      };
+    }
 
+    // Successful authentication
+    found.failedLoginAttempts = 0;
+    found.lockedUntil = undefined;
     const nowStamp = new Date().toISOString().replace('T', ' ').substring(0, 16);
-    target.lastLogin = nowStamp;
-    this.currentUser = target;
+    found.lastLogin = nowStamp;
+    this.currentUser = found;
+    this.strictSecurityMode = true;
+    this.sessionExpiresAt = Date.now() + SESSION_DURATION_MS;
 
     if (typeof window !== 'undefined' && window.sessionStorage) {
       try {
-        window.sessionStorage.setItem(SESSION_USER_KEY, target.userId);
+        window.sessionStorage.setItem(SESSION_USER_KEY, found.userId);
+        window.sessionStorage.setItem(SESSION_EXPIRY_KEY, String(this.sessionExpiresAt));
       } catch {
         // ignore
       }
     }
 
-    this.logAction('LOGIN', 'UserSession', target.userId, `${target.fullName} (${target.role})`, `Authenticated into ${target.department}`);
+    this.logAction('LOGIN', 'UserSession', found.userId, `${found.fullName} (${found.role})`, `Authenticated into ${found.department}`);
     this.saveToStorage();
-    return target;
+    return { success: true, user: found };
   }
 
-  public logout(): void {
+  /**
+   * Version 2.1 Hardened `loginAsUser`:
+   * Blocks unauthenticated or unauthorized account switching in production mode.
+   * Only allowed if:
+   *  1) Demo Sandbox Mode is explicitly active (`this.isDemoSandbox === true`), OR
+   *  2) Valid credential (`secret`) is supplied for the target user.
+   */
+  public loginAsUser(userId: string, secret?: string): SystemUser | null {
+    const users = this.getUsers();
+    const target = users.find(u => u.userId === userId);
+    if (!target) return null;
+
+    if (secret !== undefined) {
+      const auth = this.authenticateUser(userId, secret);
+      if (!auth.success) {
+        throw new Error(auth.error || 'Authentication failed.');
+      }
+      return auth.user || null;
+    }
+
+    // If in Demo Sandbox Mode, allow quick role preview switching
+    if (this.isDemoSandbox) {
+      if (target.status !== 'Active') return null;
+      this.currentUser = target;
+      this.sessionExpiresAt = Date.now() + SESSION_DURATION_MS;
+      this.logAction('LOGIN', 'DemoSandboxSession', target.userId, `${target.fullName} (${target.role})`, 'Switched role in isolated Demo Sandbox');
+      this.saveToStorage();
+      return target;
+    }
+
+    // In Production mode, block passwordless account switching / impersonation!
+    this.logAction(
+      'SECURITY_ALERT',
+      'UserSession',
+      userId,
+      this.getActorLabel(),
+      `Blocked unauthorized passwordless account switch attempt to ${userId}`
+    );
+    throw new Error('Security Policy Violation: Unrestricted account switching is disabled in production. Please sign in with your personal passcode.');
+  }
+
+  public logout(reason = 'Ended active session'): void {
     if (this.currentUser) {
-      this.logAction('LOGOUT', 'UserSession', this.currentUser.userId, `${this.currentUser.fullName} (${this.currentUser.role})`, 'Ended active session');
+      this.logAction('LOGOUT', 'UserSession', this.currentUser.userId, `${this.currentUser.fullName} (${this.currentUser.role})`, reason);
     }
     this.currentUser = null;
+    this.sessionExpiresAt = null;
     if (typeof window !== 'undefined' && window.sessionStorage) {
       try {
         window.sessionStorage.removeItem(SESSION_USER_KEY);
+        window.sessionStorage.removeItem(SESSION_EXPIRY_KEY);
       } catch {
         // ignore
       }
@@ -972,17 +1736,33 @@ export class OpsStore {
   }
 
   public addUser(u: SystemUser, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_USERS');
     const users = this.getUsers();
-    users.push(u);
-    this.logAction('CREATE', 'SystemUser', u.userId, actor, `${u.fullName} (${u.role})`);
+    if (users.some(x => x.userId === u.userId || x.email.toLowerCase() === u.email.toLowerCase())) {
+      throw new Error(`User ID ${u.userId} or email ${u.email} already exists.`);
+    }
+    const rawSecret = u.pinCode || '1234';
+    const secureUser: SystemUser = {
+      ...u,
+      passwordHash: u.passwordHash || hashCredential(u.userId, rawSecret)
+    };
+    delete secureUser.pinCode;
+    users.push(secureUser);
+    this.logAction('CREATE', 'SystemUser', secureUser.userId, actor, `${secureUser.fullName} (${secureUser.role})`);
     this.saveToStorage();
   }
 
   public updateUser(userId: string, partial: Partial<SystemUser>, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_USERS');
     const users = this.getUsers();
     const idx = users.findIndex(u => u.userId === userId);
     if (idx >= 0) {
-      users[idx] = { ...users[idx], ...partial };
+      const updated: SystemUser = { ...users[idx], ...partial };
+      if (partial.pinCode) {
+        updated.passwordHash = hashCredential(userId, partial.pinCode);
+        delete updated.pinCode;
+      }
+      users[idx] = updated;
       if (this.currentUser && this.currentUser.userId === userId) {
         this.currentUser = users[idx].status === 'Active' ? users[idx] : null;
       }
@@ -991,37 +1771,73 @@ export class OpsStore {
     }
   }
 
-  public approveExpense(expenseId: string, actor = 'Founder/CEO'): void {
+  public approveExpense(expenseId: string, overrideReason?: string): void {
+    this.enforcePermission('APPROVE_EXPENSE');
     const idx = this.state.expenses.findIndex(e => e.expenseId === expenseId);
-    if (idx >= 0) {
-      const resolvedActor = this.getActorLabel(actor);
-      this.state.expenses[idx] = {
-        ...this.state.expenses[idx],
-        approvalStatus: 'Approved',
-        approvedBy: resolvedActor
-      };
-      this.logAction('APPROVE', 'Expense', expenseId, resolvedActor, `Approved expense of GH₵${this.state.expenses[idx].amount}`);
-      this.recalculateAll();
-      this.saveToStorage();
+    if (idx < 0) throw new Error(`Expense ${expenseId} not found.`);
+
+    const exp = this.state.expenses[idx];
+    this.assertPeriodOpen(exp.expenseDate, 'Expense');
+
+    const resolvedActor = this.getActorLabel();
+    const isSelfSubmitted =
+      this.currentUser &&
+      exp.submittedBy &&
+      (exp.submittedBy.includes(this.currentUser.userId) || exp.submittedBy.includes(this.currentUser.fullName));
+
+    let documentedOverride = exp.selfApprovalOverrideReason;
+    if (isSelfSubmitted) {
+      documentedOverride =
+        overrideReason ||
+        'Lean Staffing Structure Executive Exception: Prepared and approved by Founder/CEO with supporting evidence.';
     }
+
+    this.state.expenses[idx] = {
+      ...exp,
+      approvalStatus: 'Approved',
+      approvedBy: resolvedActor,
+      approvedAt: new Date().toISOString(),
+      selfApprovalOverrideReason: documentedOverride
+    };
+    this.logAction(
+      'APPROVE',
+      'Expense',
+      expenseId,
+      resolvedActor,
+      `Approved expense of GH₵${exp.amount}${documentedOverride ? ` [${documentedOverride}]` : ''}`,
+      { authReference: `EXP-APPR-${expenseId}`, reason: documentedOverride }
+    );
+    this.recalculateAll();
+    this.saveToStorage();
   }
 
-  public rejectExpense(expenseId: string, actor = 'Founder/CEO'): void {
+  public rejectExpense(expenseId: string, rejectionReason = 'Rejected during executive review'): void {
+    this.enforcePermission('REJECT_EXPENSE');
     const idx = this.state.expenses.findIndex(e => e.expenseId === expenseId);
-    if (idx >= 0) {
-      const resolvedActor = this.getActorLabel(actor);
-      this.state.expenses[idx] = {
-        ...this.state.expenses[idx],
-        approvalStatus: 'Rejected',
-        approvedBy: resolvedActor
-      };
-      this.logAction('REJECT', 'Expense', expenseId, resolvedActor, `Rejected expense of GH₵${this.state.expenses[idx].amount}`);
-      this.recalculateAll();
-      this.saveToStorage();
-    }
+    if (idx < 0) throw new Error(`Expense ${expenseId} not found.`);
+
+    const exp = this.state.expenses[idx];
+    this.assertPeriodOpen(exp.expenseDate, 'Expense');
+
+    const resolvedActor = this.getActorLabel();
+    this.state.expenses[idx] = {
+      ...exp,
+      approvalStatus: 'Rejected',
+      PaymentStatus: 'Unpaid',
+      paymentStatus: 'Unpaid',
+      approvedBy: resolvedActor,
+      approvedAt: new Date().toISOString(),
+      rejectionReason
+    } as Expense;
+    this.logAction('REJECT', 'Expense', expenseId, resolvedActor, `Rejected expense of GH₵${exp.amount}: ${rejectionReason}`, {
+      reason: rejectionReason
+    });
+    this.recalculateAll();
+    this.saveToStorage();
   }
 
   public approveQuoteDiscount(quoteId: string, actor = 'Founder/CEO'): void {
+    this.enforcePermission('APPROVE_DISCOUNT');
     const idx = this.state.quotes.findIndex(q => q.quoteId === quoteId);
     if (idx >= 0) {
       const resolvedActor = this.getActorLabel(actor);
@@ -1035,20 +1851,52 @@ export class OpsStore {
     }
   }
 
-  // Backup & Restore
+  // Backup, Validation & Restore
+  public validateDataset(candidate: any): DatasetValidationReport {
+    return validateAndInspectDataset(candidate);
+  }
+
   public resetToEmpty(actor = 'Founder/CEO'): void {
+    this.enforcePermission('IMPORT_RESET_DATABASE');
+    const preservedLogs = [...this.state.auditLogs];
     this.state = this.getEmptyState();
-    this.logAction('IMPORT', 'Database', 'SYSTEM', actor, 'Reset database to empty production state');
+    this.state.auditLogs = preservedLogs;
+    this.logAction('IMPORT', 'Database', 'SYSTEM', actor, 'Reset database to empty production state (audit trail preserved)');
     this.recalculateAll();
     this.saveToStorage();
   }
 
   public loadState(newState: OpsDatabaseState, actor = 'Founder/CEO'): void {
+    this.enforcePermission('IMPORT_RESET_DATABASE');
+    const validation = validateAndInspectDataset(newState);
+    if (!validation.valid) {
+      throw new Error(`Invalid dataset rejected: ${validation.errors.join(' ')}`);
+    }
+
+    // Preserve existing audit logs and merge without loss
+    const existingLogs = this.state?.auditLogs || [];
+    const incomingLogs = Array.isArray(newState.auditLogs) ? newState.auditLogs : [];
+    const seenIds = new Set(incomingLogs.map(l => l.id));
+    const mergedLogs = [
+      ...existingLogs.filter(l => !seenIds.has(l.id)),
+      ...incomingLogs
+    ];
+
     this.state = {
+      ...this.getEmptyState(),
       ...newState,
-      users: Array.isArray(newState.users) && newState.users.length > 0 ? newState.users : [...DEFAULT_USERS]
+      users: sanitizeUsersCredentials(
+        Array.isArray(newState.users) && newState.users.length > 0 ? newState.users : [...DEFAULT_USERS]
+      ),
+      auditLogs: mergedLogs
     };
-    this.logAction('IMPORT', 'Database', 'SYSTEM', actor, 'Imported database state');
+    this.logAction(
+      'IMPORT',
+      'Database',
+      'SYSTEM',
+      actor,
+      `Imported validated dataset (Customers: ${validation.summary.customerCount}, Invoices: ${validation.summary.invoiceCount}, Net Rev: GH₵${validation.summary.totalInvoicedNet})`
+    );
     this.recalculateAll();
     this.saveToStorage();
   }

@@ -1,7 +1,7 @@
 {
   "name": "civitas-operations-system",
-  "version": "2.0.0",
-  "description": "Civitas Estate & Maintenance - Operations and Financial Control System (Phases 1 & 2)",
+  "version": "2.1.0",
+  "description": "Civitas Estate & Maintenance - Operations and Financial Control System (Version 2.1)",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -11,6 +11,7 @@ import type {
   SystemSettings,
   SystemUser
 } from './types.ts';
+import { hashCredential } from './security.ts';
 
 export const DEFAULT_SETTINGS: SystemSettings = {
   companyName: 'Civitas Estate & Maintenance',
@@ -122,7 +123,7 @@ export const DEFAULT_USERS: SystemUser[] = [
     phone: '+233 20 952 7426',
     role: 'Founder / CEO',
     department: 'Executive & Governance',
-    pinCode: '2026',
+    passwordHash: hashCredential('U0001', '2026'),
     status: 'Active',
     createdDate: '2026-01-01',
     lastLogin: '2026-11-07 08:30',
@@ -135,7 +136,7 @@ export const DEFAULT_USERS: SystemUser[] = [
     phone: '+233 55 506 2589',
     role: 'Operations Coordinator',
     department: 'Service Operations',
-    pinCode: '1111',
+    passwordHash: hashCredential('U0002', '1111'),
     status: 'Active',
     createdDate: '2026-01-15',
     lastLogin: '2026-11-07 09:15',
@@ -148,7 +149,7 @@ export const DEFAULT_USERS: SystemUser[] = [
     phone: '+233 24 812 3901',
     role: 'Finance & Accounts Officer',
     department: 'Finance & Control',
-    pinCode: '2222',
+    passwordHash: hashCredential('U0003', '2222'),
     status: 'Active',
     createdDate: '2026-02-01',
     lastLogin: '2026-11-06 17:40',
@@ -161,7 +162,7 @@ export const DEFAULT_USERS: SystemUser[] = [
     phone: '+233 27 409 8812',
     role: 'Field Supervisor',
     department: 'Field Operations',
-    pinCode: '3333',
+    passwordHash: hashCredential('U0004', '3333'),
     status: 'Active',
     createdDate: '2026-02-10',
     lastLogin: '2026-11-07 07:50',
@@ -174,7 +175,7 @@ export const DEFAULT_USERS: SystemUser[] = [
     phone: '+233 50 611 4400',
     role: 'Board / Internal Auditor',
     department: 'Board & Audit',
-    pinCode: '4444',
+    passwordHash: hashCredential('U0005', '4444'),
     status: 'Active',
     createdDate: '2026-03-01',
     lastLogin: '2026-11-05 14:20',
