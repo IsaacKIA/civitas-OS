@@ -551,4 +551,74 @@ describe('Civitas Operations & Financial Control System — Version 2.1 Suite', 
     assert.strictEqual(finalJob.marginPct, 0.67);
   });
 
+  it('Smart Document Upload: Auto-creates Quotation, Tax Invoice, Payment Receipt, and Expense entries while keeping all 6 Reconciliations at 0.00', () => {
+    const store = new OpsStore();
+    store.loadState(createDemoState());
+    store.authenticateUser('admin@civitasestate.com', '2026');
+
+    // 1. Upload Quotation for a brand new client
+    const qRes = store.autoPostUploadedDocument({
+      docType: 'quotation',
+      partyName: 'Nana Ama Danquah',
+      description: 'Full villa electrical surge protection & panel upgrade',
+      amount: 2400,
+      date: '2026-07-05',
+      category: 'Electrical',
+      area: 'Airport Residential',
+      fileName: 'Quote_NanaAma_2400.pdf'
+    });
+    assert.strictEqual(qRes.documentType, 'quote');
+    assert.ok(store.getState().quotes.some(q => q.quoteId === qRes.primaryId && q.netOfDiscount === 2400));
+
+    // 2. Upload Tax Invoice for the same client
+    const invRes = store.autoPostUploadedDocument({
+      docType: 'invoice',
+      partyName: 'Nana Ama Danquah',
+      description: 'Full villa electrical surge protection & panel upgrade',
+      amount: 2400,
+      date: '2026-07-06',
+      category: 'Electrical',
+      area: 'Airport Residential',
+      fileName: 'Invoice_NanaAma_2400.pdf'
+    });
+    assert.strictEqual(invRes.documentType, 'invoice');
+    assert.ok(store.getState().invoices.some(i => i.invoiceNo === invRes.primaryId && i.amountBeforeTax === 2400));
+
+    // 3. Upload Official Payment Receipt (auto-matches the open invoice or creates backing invoice if needed)
+    const recRes = store.autoPostUploadedDocument({
+      docType: 'payment_receipt',
+      partyName: 'Nana Ama Danquah',
+      description: 'Settlement of Electrical Surge Protection Invoice',
+      amount: 2400,
+      date: '2026-07-06',
+      paymentMethod: 'Mobile Money',
+      reference: 'MOMO-UPL-9901',
+      fileName: 'Receipt_NanaAma_2400.pdf'
+    });
+    assert.strictEqual(recRes.documentType, 'receipt');
+    assert.ok(store.getState().payments.some(p => p.paymentId === recRes.primaryId && p.amount === 2400));
+
+    // 4. Upload Supplier Expense Receipt
+    const expRes = store.autoPostUploadedDocument({
+      docType: 'expense_receipt',
+      partyName: 'Electroland Ghana Ltd',
+      description: 'Schneider surge arrestors & breaker switches',
+      amount: 850,
+      date: '2026-07-06',
+      category: 'Materials',
+      paymentMethod: 'Mobile Money',
+      reference: 'SUP-INV-7712',
+      fileName: 'Electroland_Receipt_850.jpg'
+    });
+    assert.strictEqual(expRes.documentType, 'expense');
+    assert.ok(store.getState().expenses.some(e => e.expenseId === expRes.primaryId && e.amount === 850));
+
+    // Verify all 6 Reconciliation Control Totals remain RECONCILED (0.00 diff)
+    const evaluation = store.getChecksEvaluation();
+    evaluation.controlTotals.forEach(t => {
+      assert.strictEqual(t.status, 'RECONCILED', `Control total ${t.name} must remain RECONCILED after smart upload`);
+      assert.strictEqual(t.countOrValue, 0.00, `Difference for ${t.name} must remain 0.00`);
+    });
+  });
+
 });

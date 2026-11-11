@@ -4,12 +4,13 @@
  * Modern, responsive, zero-external-dependency TypeScript interface.
  */
 
-import { opsStore, type OpsDatabaseState } from './store.ts';
+import { opsStore, type OpsDatabaseState, type UploadedDocumentPayload } from './store.ts';
 import { createDemoState } from './demo-data.ts';
 import { roundMoney, formatYMD } from './calculations.ts';
 import {
   renderPrintQuoteHtml,
   renderPrintInvoiceHtml,
+  renderPrintReceiptHtml,
   renderPrintMonthlyReportHtml,
   renderPrintInspectionHtml
 } from './reports.ts';
@@ -51,6 +52,8 @@ class OpsApp {
   private currentTab: ActiveTab = 'dashboard';
   private loginError: string = '';
   private selectedCustomerForQuote?: string;
+  private selectedPrintDocKeys: Set<string> = new Set();
+  private printDocFilter: 'all' | 'quote' | 'invoice' | 'receipt' | 'inspection' = 'all';
 
   constructor(mountId: string) {
     const el = document.getElementById(mountId);
@@ -257,6 +260,12 @@ class OpsApp {
                     Exit Demo
                   </button>
                 </div>
+              ` : ''}
+
+              ${opsStore.canCurrentUser('MANAGE_INVOICES_PAYMENTS') || opsStore.canCurrentUser('MANAGE_CUSTOMERS_QUOTES') || opsStore.canCurrentUser('RECORD_EXPENSE') ? `
+                <button id="btnSmartUploadDoc" class="btn-brand-outline" style="font-size: 12px; padding: 7px 14px; border-radius: 999px; border-color: #075545; color: #075545; font-weight: 700;">
+                  📤 Upload Quote / Invoice / Receipt
+                </button>
               ` : ''}
 
               ${opsStore.canCurrentUser('MANAGE_USERS') ? `
@@ -1360,6 +1369,9 @@ class OpsApp {
           <button class="btn-brand-outline btn-toggle-pay-recon" data-id="${p.paymentId}" style="padding: 2px 6px; font-size: 10px; margin-left: 4px;" title="Toggle reconciliation status">
             ${p.reconciliationStatus === 'Reconciled' ? 'Mark Unreconciled' : 'Reconcile'}
           </button>
+          <button class="btn-brand-outline btn-print-receipt" data-id="${p.paymentId}" style="padding: 2px 8px; font-size: 10px; margin-left: 4px;">
+            Print Receipt
+          </button>
         </td>
       </tr>
     `).join('');
@@ -1393,7 +1405,10 @@ class OpsApp {
         <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0;">
           Invoices &amp; Receivables Register
         </h2>
-        <button id="btnNewInvoice" class="btn-brand-primary">+ Create Invoice</button>
+        <div style="display: flex; gap: 8px;">
+          <button id="btnUploadInvoiceQuick" class="btn-brand-outline" style="border-color: #075545; color: #075545; font-weight: 700;">📤 Upload Invoice</button>
+          <button id="btnNewInvoice" class="btn-brand-primary">+ Create Invoice</button>
+        </div>
       </div>
       <div class="ops-table-container" style="margin-bottom: 32px;">
         <table class="ops-table">
@@ -1422,7 +1437,10 @@ class OpsApp {
         <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0;">
           Payments &amp; Cash Received Register (Cash &ne; Revenue)
         </h2>
-        <button id="btnNewPayment" class="btn-brand-primary">+ Record Payment</button>
+        <div style="display: flex; gap: 8px;">
+          <button id="btnUploadReceiptQuick" class="btn-brand-outline" style="border-color: #075545; color: #075545; font-weight: 700;">📤 Upload Receipt</button>
+          <button id="btnNewPayment" class="btn-brand-primary">+ Record Payment</button>
+        </div>
       </div>
       <div class="ops-table-container">
         <table class="ops-table">
@@ -2258,73 +2276,191 @@ class OpsApp {
   }
 
   // ==========================================
-  // TAB 12: PRINTABLE DOCUMENTS SUITE
+  // TAB 12: PRINTABLE DOCUMENTS SUITE & ROW SELECTION
   // ==========================================
   private renderPrintSuiteTab(state: OpsDatabaseState): string {
-    const quotes = state.quotes;
-    const invoices = state.invoices;
-    const inspections = state.inspections;
+    const currency = state.settings.currencySymbol;
+
+    interface SelectableDocRow {
+      key: string; // e.g. 'quote:Q0001', 'invoice:INV0001', 'receipt:PAY0001', 'inspection:IS0001'
+      docType: 'quote' | 'invoice' | 'receipt' | 'inspection';
+      typeBadge: string;
+      badgeClass: string;
+      docId: string;
+      date: string;
+      partyName: string;
+      description: string;
+      amountLabel: string;
+      statusLabel: string;
+    }
+
+    const allRows: SelectableDocRow[] = [
+      ...state.quotes.map((q): SelectableDocRow => ({
+        key: `quote:${q.quoteId}`,
+        docType: 'quote',
+        typeBadge: 'Quotation',
+        badgeClass: 'badge-pending',
+        docId: q.quoteId,
+        date: q.quoteDate,
+        partyName: q.customerName || q.customerId,
+        description: q.notes || 'Service Quotation',
+        amountLabel: `${currency}${roundMoney(q.netOfDiscount || q.total || 0).toFixed(2)}`,
+        statusLabel: q.status
+      })),
+      ...state.invoices.map((inv): SelectableDocRow => ({
+        key: `invoice:${inv.invoiceNo}`,
+        docType: 'invoice',
+        typeBadge: 'Tax Invoice',
+        badgeClass: 'badge-ok',
+        docId: inv.invoiceNo,
+        date: inv.invoiceDate,
+        partyName: inv.customerName || inv.customerId,
+        description: inv.notes || inv.division || 'Tax Invoice',
+        amountLabel: `${currency}${roundMoney(inv.amountBeforeTax || 0).toFixed(2)}`,
+        statusLabel: `${inv.status || 'Issued'} (Bal: ${currency}${roundMoney(inv.balance || 0).toFixed(2)})`
+      })),
+      ...state.payments.map((pay): SelectableDocRow => ({
+        key: `receipt:${pay.paymentId}`,
+        docType: 'receipt',
+        typeBadge: 'Official Receipt',
+        badgeClass: 'badge-reconciled',
+        docId: pay.paymentId,
+        date: pay.paymentDate,
+        partyName: pay.customerName || pay.customerId || 'Customer',
+        description: `Payment for ${pay.invoiceNo} (${pay.method} • ${pay.reference || 'Verified'})`,
+        amountLabel: `${currency}${roundMoney(pay.amount || 0).toFixed(2)}`,
+        statusLabel: pay.reconciliationStatus || 'Reconciled'
+      })),
+      ...state.inspections.map((ins): SelectableDocRow => ({
+        key: `inspection:${ins.inspectionId}`,
+        docType: 'inspection',
+        typeBadge: 'Condition Report',
+        badgeClass: 'badge-ok',
+        docId: ins.inspectionId,
+        date: ins.inspectionDate,
+        partyName: ins.customerName || ins.propertyId,
+        description: `${ins.inspectionType} (${ins.conditionRating || 'Good'})`,
+        amountLabel: '—',
+        statusLabel: ins.reportStatus || 'Issued'
+      }))
+    ];
+
+    const filteredRows = this.printDocFilter === 'all'
+      ? allRows
+      : allRows.filter(r => r.docType === this.printDocFilter);
+
+    const allFilteredSelected =
+      filteredRows.length > 0 && filteredRows.every(r => this.selectedPrintDocKeys.has(r.key));
+
+    const rowsHtml = filteredRows.map(r => {
+      const isSelected = this.selectedPrintDocKeys.has(r.key);
+      return `
+        <tr class="selectable-doc-row" data-key="${r.key}" style="cursor: pointer; background: ${isSelected ? '#ecfdf5' : 'transparent'}; transition: background 0.15s ease;">
+          <td style="text-align: center; width: 42px;" onclick="event.stopPropagation();">
+            <input type="checkbox" class="doc-row-checkbox" data-key="${r.key}" ${isSelected ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; accent-color: #075545;" />
+          </td>
+          <td><span class="ops-badge ${r.badgeClass}">${r.typeBadge}</span></td>
+          <td style="font-weight: 800; color: #043D33; font-family: monospace; font-size: 13px;">${r.docId}</td>
+          <td>${r.date}</td>
+          <td style="font-weight: 700; color: #1e293b;">${r.partyName}</td>
+          <td style="color: #475569; font-size: 12px;">${r.description}</td>
+          <td style="text-align: right; font-weight: 800; color: #075545;">${r.amountLabel}</td>
+          <td><span style="font-size: 11px; font-weight: 600; color: #475569;">${r.statusLabel}</span></td>
+          <td style="text-align: right; white-space: nowrap;" onclick="event.stopPropagation();">
+            <button type="button" class="btn-brand-primary btn-single-doc-print" data-key="${r.key}" style="padding: 5px 12px; font-size: 11px;">
+              Print PDF
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
 
     return `
-      <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0 0 12px 0;">
-        Official Printable Document Suite
-      </h2>
-      <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 24px 0;">
-        Generate pixel-perfect, branded printable PDFs directly in the browser for quotations, invoices, monthly reports, and property condition assessments.
-      </p>
+      <!-- Top Action & Upload Banner -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 20px;">
+        <div>
+          <h2 style="font-size: 18px; font-weight: 800; color: #043D33; margin: 0 0 4px 0;">
+            Document Generation &amp; Interactive Row Selection Suite
+          </h2>
+          <p style="font-size: 12px; color: #64748b; margin: 0;">
+            Click any row (or checkbox) below to select Quotations, Tax Invoices, Official Receipts, or Inspection Reports and generate PDFs in one click.
+          </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <button type="button" id="btnPrintSuiteUpload" class="btn-brand-outline" style="border-color: #075545; color: #075545; font-weight: 700;">
+            📤 Upload Quote / Invoice / Receipt
+          </button>
+          <button type="button" id="btnPrintSelectedDocs" class="btn-brand-primary" ${this.selectedPrintDocKeys.size === 0 ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''}>
+            🖨️ Generate PDF for Selected (${this.selectedPrintDocKeys.size})
+          </button>
+        </div>
+      </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
-        <!-- Printable Quotation -->
-        <div class="ops-card">
-          <h3 style="font-size: 16px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Official Quotation</h3>
-          <p style="font-size: 12px; color: #64748b; margin: 0 0 14px 0;">Select a quotation to view, print, or export as PDF with full terms.</p>
-          <select id="selectPrintQuote" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; margin-bottom: 12px; font-size: 13px;">
-            ${quotes.map(q => `<option value="${q.quoteId}">Quote ${q.quoteId} &bull; ${q.customerName} (${state.settings.currencySymbol}${q.netOfDiscount})</option>`).join('')}
-          </select>
-          <button id="btnTriggerPrintQuote" class="btn-brand-primary" style="width: 100%; justify-content: center;">
-            Generate Quotation PDF
+      <!-- Filter Pills + Batch Selection Controls + Monthly Report Bar -->
+      <div class="ops-card" style="padding: 16px 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <button type="button" class="btn-doc-filter ${this.printDocFilter === 'all' ? 'btn-brand-primary' : 'btn-brand-outline'}" data-filter="all" style="padding: 6px 14px; font-size: 12px; border-radius: 999px;">
+            All (${allRows.length})
+          </button>
+          <button type="button" class="btn-doc-filter ${this.printDocFilter === 'quote' ? 'btn-brand-primary' : 'btn-brand-outline'}" data-filter="quote" style="padding: 6px 14px; font-size: 12px; border-radius: 999px;">
+            Quotations (${state.quotes.length})
+          </button>
+          <button type="button" class="btn-doc-filter ${this.printDocFilter === 'invoice' ? 'btn-brand-primary' : 'btn-brand-outline'}" data-filter="invoice" style="padding: 6px 14px; font-size: 12px; border-radius: 999px;">
+            Tax Invoices (${state.invoices.length})
+          </button>
+          <button type="button" class="btn-doc-filter ${this.printDocFilter === 'receipt' ? 'btn-brand-primary' : 'btn-brand-outline'}" data-filter="receipt" style="padding: 6px 14px; font-size: 12px; border-radius: 999px;">
+            Official Receipts (${state.payments.length})
+          </button>
+          <button type="button" class="btn-doc-filter ${this.printDocFilter === 'inspection' ? 'btn-brand-primary' : 'btn-brand-outline'}" data-filter="inspection" style="padding: 6px 14px; font-size: 12px; border-radius: 999px;">
+            Inspections (${state.inspections.length})
           </button>
         </div>
 
-        <!-- Printable Invoice -->
-        <div class="ops-card">
-          <h3 style="font-size: 16px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Tax Invoice</h3>
-          <p style="font-size: 12px; color: #64748b; margin: 0 0 14px 0;">Select an invoice to generate official receipt/invoice with balance.</p>
-          <select id="selectPrintInvoice" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; margin-bottom: 12px; font-size: 13px;">
-            ${invoices.map(i => `<option value="${i.invoiceNo}">Invoice ${i.invoiceNo} &bull; ${i.customerName} (Bal: ${state.settings.currencySymbol}${i.balance})</option>`).join('')}
+        <!-- Monthly Management Report Quick Generator -->
+        <div style="display: flex; align-items: center; gap: 8px; background: #FAF8F5; padding: 6px 12px; border-radius: 10px; border: 1px solid #e2e8f0;">
+          <span style="font-size: 11px; font-weight: 700; color: #043D33;">Monthly Report:</span>
+          <select id="selectPrintMonth" style="padding: 5px 8px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 12px;">
+            <option value="0">January ${state.settings.reportingYear}</option>
+            <option value="1">February ${state.settings.reportingYear}</option>
+            <option value="2" selected>March ${state.settings.reportingYear}</option>
+            <option value="3">April ${state.settings.reportingYear}</option>
+            <option value="4">May ${state.settings.reportingYear}</option>
+            <option value="5">June ${state.settings.reportingYear}</option>
+            <option value="6">July ${state.settings.reportingYear}</option>
+            <option value="7">August ${state.settings.reportingYear}</option>
+            <option value="8">September ${state.settings.reportingYear}</option>
+            <option value="9">October ${state.settings.reportingYear}</option>
+            <option value="10">November ${state.settings.reportingYear}</option>
+            <option value="11">December ${state.settings.reportingYear}</option>
           </select>
-          <button id="btnTriggerPrintInvoice" class="btn-brand-primary" style="width: 100%; justify-content: center;">
-            Generate Invoice PDF
+          <button id="btnTriggerPrintMonthly" class="btn-brand-outline" style="padding: 5px 12px; font-size: 11px;">
+            Print Monthly PDF
           </button>
         </div>
+      </div>
 
-        <!-- Monthly Report -->
-        <div class="ops-card">
-          <h3 style="font-size: 16px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Monthly Management Report</h3>
-          <p style="font-size: 12px; color: #64748b; margin: 0 0 14px 0;">Executive summary of monthly results, cash flow, and control status.</p>
-          <select id="selectPrintMonth" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; margin-bottom: 12px; font-size: 13px;">
-            <option value="2">March 2026</option>
-            <option value="3">April 2026</option>
-            <option value="5">June 2026</option>
-            <option value="9">October 2026</option>
-            <option value="10">November 2026</option>
-          </select>
-          <button id="btnTriggerPrintMonthly" class="btn-brand-primary" style="width: 100%; justify-content: center;">
-            Generate Monthly Report PDF
-          </button>
-        </div>
-
-        <!-- Property Condition Report -->
-        <div class="ops-card">
-          <h3 style="font-size: 16px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Property Condition Report</h3>
-          <p style="font-size: 12px; color: #64748b; margin: 0 0 14px 0;">Property Watch visual inspection report for owners and diaspora clients.</p>
-          <select id="selectPrintInspection" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; margin-bottom: 12px; font-size: 13px;">
-            ${inspections.map(ins => `<option value="${ins.inspectionId}">Inspection ${ins.inspectionId} &bull; ${ins.customerName || ins.propertyId} (${ins.conditionRating})</option>`).join('')}
-          </select>
-          <button id="btnTriggerPrintInspection" class="btn-brand-primary" style="width: 100%; justify-content: center;">
-            Generate Condition Report PDF
-          </button>
-        </div>
+      <!-- Interactive Row-Selection Table -->
+      <div class="ops-table-container">
+        <table class="ops-table">
+          <thead>
+            <tr>
+              <th style="text-align: center; width: 42px;">
+                <input type="checkbox" id="chkSelectAllDocs" ${allFilteredSelected ? 'checked' : ''} title="Select / Deselect All Visible Rows" style="width: 16px; height: 16px; cursor: pointer; accent-color: #075545;" />
+              </th>
+              <th>Document Type</th>
+              <th>Document No</th>
+              <th>Date</th>
+              <th>Client / Party</th>
+              <th>Service / Description</th>
+              <th style="text-align: right;">Amount</th>
+              <th>Status</th>
+              <th style="text-align: right;">Quick Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || `<tr><td colspan="9" style="text-align: center; padding: 32px; color: #64748b;">No documents found in this view. Click <strong>"📤 Upload Quote / Invoice / Receipt"</strong> above to add or upload documents.</td></tr>`}
+          </tbody>
+        </table>
       </div>
     `;
   }
@@ -2412,6 +2548,72 @@ class OpsApp {
     document.getElementById('btnNewInspection')?.addEventListener('click', () => this.showNewInspectionModal());
     document.getElementById('btnNewUser')?.addEventListener('click', () => this.showNewUserModal());
     document.getElementById('btnTopbarAddUser')?.addEventListener('click', () => this.showNewUserModal());
+
+    // Smart Upload & Auto-Entry Modal triggers
+    document.getElementById('btnSmartUploadDoc')?.addEventListener('click', () => this.showSmartUploadModal('invoice'));
+    document.getElementById('btnPrintSuiteUpload')?.addEventListener('click', () => this.showSmartUploadModal('invoice'));
+    document.getElementById('btnUploadInvoiceQuick')?.addEventListener('click', () => this.showSmartUploadModal('invoice'));
+    document.getElementById('btnUploadReceiptQuick')?.addEventListener('click', () => this.showSmartUploadModal('payment_receipt'));
+
+    // Document Suite Filter Pills & Interactive Row Selection
+    this.mountEl.querySelectorAll<HTMLButtonElement>('.btn-doc-filter').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const f = btn.dataset.filter as any;
+        if (f) {
+          this.printDocFilter = f;
+          this.render();
+        }
+      });
+    });
+
+    const toggleDocRowSelection = (key: string) => {
+      if (this.selectedPrintDocKeys.has(key)) {
+        this.selectedPrintDocKeys.delete(key);
+      } else {
+        this.selectedPrintDocKeys.add(key);
+      }
+      this.render();
+    };
+
+    this.mountEl.querySelectorAll<HTMLElement>('.selectable-doc-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const key = row.dataset.key;
+        if (key) toggleDocRowSelection(key);
+      });
+    });
+
+    this.mountEl.querySelectorAll<HTMLInputElement>('.doc-row-checkbox').forEach(chk => {
+      chk.addEventListener('change', () => {
+        const key = chk.dataset.key;
+        if (key) toggleDocRowSelection(key);
+      });
+    });
+
+    const selectAllChk = document.getElementById('chkSelectAllDocs') as HTMLInputElement | null;
+    selectAllChk?.addEventListener('change', () => {
+      const visibleCheckboxes = this.mountEl.querySelectorAll<HTMLInputElement>('.doc-row-checkbox');
+      visibleCheckboxes.forEach(chk => {
+        const key = chk.dataset.key;
+        if (!key) return;
+        if (selectAllChk.checked) {
+          this.selectedPrintDocKeys.add(key);
+        } else {
+          this.selectedPrintDocKeys.delete(key);
+        }
+      });
+      this.render();
+    });
+
+    document.getElementById('btnPrintSelectedDocs')?.addEventListener('click', () => {
+      this.printSelectedDocuments();
+    });
+
+    this.mountEl.querySelectorAll<HTMLButtonElement>('.btn-single-doc-print').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        if (key) this.printDocumentByKey(key);
+      });
+    });
 
     // Dashboard session & governance controls
     document.getElementById('btnGoLanding')?.addEventListener('click', () => {
@@ -2675,6 +2877,13 @@ class OpsApp {
       });
     });
 
+    this.mountEl.querySelectorAll<HTMLButtonElement>('.btn-print-receipt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        if (id) this.printReceipt(id);
+      });
+    });
+
     // WhatsApp quick actions
     this.mountEl.querySelectorAll<HTMLButtonElement>('.btn-whatsapp-quote').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -2898,6 +3107,115 @@ An official PDF condition report is available upon request. Thank you for choosi
 
     const html = renderPrintInspectionHtml(ins, p, c, state.settings);
     this.openPrintWindow(html);
+  }
+
+  private printReceipt(paymentId: string): void {
+    const state = opsStore.getState();
+    const pay = state.payments.find(item => item.paymentId === paymentId);
+    if (!pay) return alert('Payment receipt not found');
+    const inv = state.invoices.find(item => item.invoiceNo === pay.invoiceNo);
+    const c: Customer = state.customers.find(item => item.customerId === (pay.customerId || inv?.customerId)) || {
+      customerId: pay.customerId || 'C0001',
+      customerName: pay.customerName || inv?.customerName || 'Valued Client',
+      category: 'Homeowner',
+      phone: '',
+      email: '',
+      preferredChannel: 'WhatsApp',
+      area: 'East Legon',
+      leadSource: 'WhatsApp',
+      dateAcquired: '',
+      relationshipOwner: 'Founder/CEO',
+      consentRecorded: 'Yes',
+      closed: 'No'
+    };
+
+    const html = renderPrintReceiptHtml(pay, inv, c, state.settings);
+    this.openPrintWindow(html);
+  }
+
+  private buildDocumentHtmlByKey(key: string): string | null {
+    const [type, id] = key.split(':');
+    const state = opsStore.getState();
+    if (type === 'quote') {
+      const q = state.quotes.find(item => item.quoteId === id);
+      if (!q) return null;
+      const c = state.customers.find(item => item.customerId === q.customerId) || ({
+        customerId: q.customerId,
+        customerName: q.customerName || 'Client',
+        phone: '',
+        email: '',
+        area: 'East Legon'
+      } as Customer);
+      const p = state.properties.find(item => item.propertyId === q.propertyId);
+      return renderPrintQuoteHtml(q, state.quoteLines, c, p, state.settings);
+    }
+    if (type === 'invoice') {
+      const inv = state.invoices.find(item => item.invoiceNo === id);
+      if (!inv) return null;
+      const c: Customer = state.customers.find(item => item.customerId === inv.customerId) || {
+        customerId: inv.customerId,
+        customerName: inv.customerName || 'Client',
+        category: 'Homeowner',
+        phone: '',
+        email: '',
+        preferredChannel: 'WhatsApp',
+        area: 'Other Accra',
+        leadSource: 'Referral',
+        dateAcquired: '',
+        relationshipOwner: 'Founder/CEO',
+        consentRecorded: 'Yes',
+        closed: 'No'
+      };
+      return renderPrintInvoiceHtml(inv, c, state.payments, state.settings);
+    }
+    if (type === 'receipt') {
+      const pay = state.payments.find(item => item.paymentId === id);
+      if (!pay) return null;
+      const inv = state.invoices.find(item => item.invoiceNo === pay.invoiceNo);
+      const c: Customer = state.customers.find(item => item.customerId === (pay.customerId || inv?.customerId)) || {
+        customerId: pay.customerId || 'C0001',
+        customerName: pay.customerName || inv?.customerName || 'Valued Client',
+        category: 'Homeowner',
+        phone: '',
+        email: '',
+        preferredChannel: 'WhatsApp',
+        area: 'East Legon',
+        leadSource: 'WhatsApp',
+        dateAcquired: '',
+        relationshipOwner: 'Founder/CEO',
+        consentRecorded: 'Yes',
+        closed: 'No'
+      };
+      return renderPrintReceiptHtml(pay, inv, c, state.settings);
+    }
+    if (type === 'inspection') {
+      const ins = state.inspections.find(item => item.inspectionId === id);
+      if (!ins) return null;
+      const p = state.properties.find(item => item.propertyId === ins.propertyId);
+      const c = p ? state.customers.find(item => item.customerId === p.customerId) : undefined;
+      return renderPrintInspectionHtml(ins, p, c, state.settings);
+    }
+    return null;
+  }
+
+  private printDocumentByKey(key: string): void {
+    const html = this.buildDocumentHtmlByKey(key);
+    if (html) this.openPrintWindow(html);
+  }
+
+  private printSelectedDocuments(): void {
+    if (this.selectedPrintDocKeys.size === 0) {
+      alert('Please select at least one row to generate PDF.');
+      return;
+    }
+    const pages: string[] = [];
+    this.selectedPrintDocKeys.forEach(key => {
+      const html = this.buildDocumentHtmlByKey(key);
+      if (html) pages.push(html);
+    });
+    if (pages.length === 0) return;
+    const combinedHtml = pages.join('<div style="page-break-after: always; height: 24px;"></div>');
+    this.openPrintWindow(combinedHtml);
   }
 
   private openPrintWindow(html: string): void {
@@ -3752,6 +4070,447 @@ An official PDF condition report is available upon request. Thank you for choosi
         }
       });
     });
+  }
+
+  private showSmartUploadModal(defaultType: UploadedDocumentPayload['docType'] = 'invoice'): void {
+    const state = opsStore.getState();
+    const today = formatYMD(new Date());
+    const customerOptions = state.customers
+      .map(c => `<option value="${this.escapeHtml(c.customerName)}">${c.customerId} — ${this.escapeHtml(c.area || 'Accra')}</option>`)
+      .join('');
+
+    const modalHtml = `
+      <div class="ops-modal-backdrop" id="opsModal">
+        <div class="ops-modal-card" style="max-width: 720px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;">
+            <div>
+              <h3 style="margin: 0 0 4px 0; color: var(--civitas-Onyx); font-family: 'Fraunces', serif;">Smart Upload &amp; Auto-Entry Engine</h3>
+              <p style="margin: 0; font-size: 0.82rem; color: var(--civitas-Sage);">
+                Upload a Quotation, Tax Invoice, Official Payment Receipt, or Expense Receipt (PDF, Image, CSV, JSON, or Text). The system automatically posts all linked Customer, Job, Invoice, Receipt, and Ledger entries while keeping all 52 internal controls balanced.
+              </p>
+            </div>
+          </div>
+
+          <form id="formSmartUpload">
+            <!-- File Dropzone -->
+            <div id="uplDropzone" style="border: 2px dashed rgba(45, 79, 62, 0.35); background: rgba(45, 79, 62, 0.04); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div>
+                <div style="font-weight: 700; font-size: 0.86rem; color: var(--civitas-Evergreen);">1. Attach Document File or Batch Sheet (Optional)</div>
+                <div id="uplFileStatus" style="font-size: 0.76rem; color: var(--civitas-Sage);">Supports .pdf, .jpg, .png, .txt, .csv, or .json — auto-extracts details &amp; batch rows</div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <label for="uplFileInput" class="btn-brand-outline" style="padding: 6px 12px; font-size: 0.78rem; cursor: pointer; margin: 0;">Choose File...</label>
+                <input type="file" id="uplFileInput" accept=".pdf,.png,.jpg,.jpeg,.csv,.txt,.json" style="display: none;" />
+              </div>
+            </div>
+
+            <!-- Batch Row Selection Table (Appears when CSV/JSON multi-row file is uploaded) -->
+            <div id="uplBatchContainer" style="display: none; margin-bottom: 14px; border: 1px solid var(--civitas-Sand); border-radius: 8px; overflow: hidden;">
+              <div style="background: rgba(45, 79, 62, 0.08); padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.8rem; font-weight: 700; color: var(--civitas-Evergreen);">Batch Rows Detected — Click Any Row to Toggle Selection</span>
+                <span id="uplBatchCountBadge" class="badge-pill badge-success">0 selected</span>
+              </div>
+              <div style="max-height: 190px; overflow-y: auto;">
+                <table class="ops-table" style="margin: 0; font-size: 0.78rem;">
+                  <thead>
+                    <tr>
+                      <th style="width: 36px; text-align: center;"><input type="checkbox" id="chkUplBatchAll" checked style="cursor: pointer;" /></th>
+                      <th>Type</th>
+                      <th>Client / Vendor</th>
+                      <th>Description / Service</th>
+                      <th class="num">Amount (GH₵)</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody id="uplBatchTbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Single Document Fields -->
+            <div id="uplSingleFields">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div>
+                  <label style="display: block; font-size: 0.78rem; font-weight: 700; margin-bottom: 4px;">Document Type *</label>
+                  <select id="uplDocType" class="ops-select" style="width: 100%; padding: 8px;">
+                    <option value="quotation" ${defaultType === 'quotation' ? 'selected' : ''}>Quotation (Estimate)</option>
+                    <option value="invoice" ${defaultType === 'invoice' ? 'selected' : ''}>Tax Invoice (Customer Billing)</option>
+                    <option value="payment_receipt" ${defaultType === 'payment_receipt' ? 'selected' : ''}>Customer Payment Receipt (Cash In)</option>
+                    <option value="expense_receipt" ${defaultType === 'expense_receipt' ? 'selected' : ''}>Supplier / Expense Receipt (Cash Out)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display: block; font-size: 0.78rem; font-weight: 700; margin-bottom: 4px;">Client / Supplier Name *</label>
+                  <input type="text" id="uplPartyName" list="uplCustomerList" required placeholder="e.g., Kojo Mensah or Electroland Ghana" style="width: 100%; padding: 8px; border: 1px solid var(--civitas-Sand); border-radius: 6px;" />
+                  <datalist id="uplCustomerList">${customerOptions}</datalist>
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1.2fr 0.9fr 0.9fr; gap: 12px; margin-bottom: 12px;">
+                <div>
+                  <label style="display: block; font-size: 0.78rem; font-weight: 700; margin-bottom: 4px;">Service / Expense Description *</label>
+                  <input type="text" id="uplDescription" required placeholder="e.g., Electrical rewiring &amp; DB upgrade" style="width: 100%; padding: 8px; border: 1px solid var(--civitas-Sand); border-radius: 6px;" />
+                </div>
+                <div>
+                  <label style="display: block; font-size: 0.78rem; font-weight: 700; margin-bottom: 4px;">Amount (GH₵) *</label>
+                  <input type="number" id="uplAmount" step="0.01" min="0.01" required placeholder="1500.00" style="width: 100%; padding: 8px; border: 1px solid var(--civitas-Sand); border-radius: 6px;" />
+                </div>
+                <div>
+                  <label style="display: block; font-size: 0.78rem; font-weight: 700; margin-bottom: 4px;">Document Date *</label>
+                  <input type="date" id="uplDate" value="${today}" required style="width: 100%; padding: 8px; border: 1px solid var(--civitas-Sand); border-radius: 6px;" />
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+                <div>
+                  <label style="display: block; font-size: 0.75rem; font-weight: 700; margin-bottom: 4px;">Division / Category</label>
+                  <select id="uplCategory" class="ops-select" style="width: 100%; padding: 7px; font-size: 0.8rem;">
+                    <option value="Electrical">Electrical</option>
+                    <option value="Plumbing">Plumbing</option>
+                    <option value="AC Servicing">AC Servicing</option>
+                    <option value="General Repairs">General Repairs</option>
+                    <option value="Painting">Painting</option>
+                    <option value="Cleaning">Cleaning</option>
+                    <option value="Inspection">Property Watch</option>
+                    <option value="Materials">Direct Materials</option>
+                    <option value="Fuel &amp; Transport">Fuel &amp; Transport</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display: block; font-size: 0.75rem; font-weight: 700; margin-bottom: 4px;">Location / Area</label>
+                  <input type="text" id="uplArea" value="East Legon" style="width: 100%; padding: 7px; font-size: 0.8rem; border: 1px solid var(--civitas-Sand); border-radius: 6px;" />
+                </div>
+                <div>
+                  <label style="display: block; font-size: 0.75rem; font-weight: 700; margin-bottom: 4px;">Payment Channel</label>
+                  <select id="uplMethod" class="ops-select" style="width: 100%; padding: 7px; font-size: 0.8rem;">
+                    <option value="Mobile Money">Mobile Money</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Cheque">Cheque</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display: block; font-size: 0.75rem; font-weight: 700; margin-bottom: 4px;">Ref / Receipt #</label>
+                  <input type="text" id="uplReference" placeholder="Auto-generated if blank" style="width: 100%; padding: 7px; font-size: 0.8rem; border: 1px solid var(--civitas-Sand); border-radius: 6px;" />
+                </div>
+              </div>
+
+              <!-- Option for Invoice: Also record immediate payment receipt -->
+              <div id="uplAutoPayRow" style="margin-bottom: 12px; padding: 8px 12px; background: rgba(200, 155, 60, 0.08); border-radius: 6px; border: 1px solid rgba(200, 155, 60, 0.25); display: ${defaultType === 'invoice' ? 'flex' : 'none'}; align-items: center; gap: 8px;">
+                <input type="checkbox" id="chkUplAutoRecordReceipt" style="width: 16px; height: 16px; cursor: pointer;" />
+                <label for="chkUplAutoRecordReceipt" style="font-size: 0.8rem; font-weight: 600; color: var(--civitas-Onyx); cursor: pointer;">
+                  This uploaded invoice is already paid — automatically generate its Reconciled Official Payment Receipt too
+                </label>
+              </div>
+            </div>
+
+            <!-- Live Accounting & Ledger Preview Banner -->
+            <div id="uplAutoEntriesPreview" style="background: rgba(45, 79, 62, 0.06); border-left: 4px solid var(--civitas-Evergreen); padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 0.8rem; color: var(--civitas-Onyx);">
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--civitas-Sage); cursor: pointer;">
+                <input type="checkbox" id="chkUplOpenPrintSuite" checked />
+                Select &amp; highlight created document(s) in Print &amp; PDF Suite immediately
+              </label>
+              <div style="display: flex; gap: 10px;">
+                <button type="button" id="btnModalCancel" class="btn-brand-outline">Cancel</button>
+                <button type="submit" class="btn-brand-primary">Post &amp; Auto-Create Entries</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    this.showModal(modalHtml, () => {
+      let batchRows: Array<UploadedDocumentPayload & { selected: boolean }> = [];
+      let uploadedFileName = '';
+
+      const docTypeEl = document.getElementById('uplDocType') as HTMLSelectElement;
+      const partyEl = document.getElementById('uplPartyName') as HTMLInputElement;
+      const descEl = document.getElementById('uplDescription') as HTMLInputElement;
+      const amountEl = document.getElementById('uplAmount') as HTMLInputElement;
+      const dateEl = document.getElementById('uplDate') as HTMLInputElement;
+      const catEl = document.getElementById('uplCategory') as HTMLSelectElement;
+      const areaEl = document.getElementById('uplArea') as HTMLInputElement;
+      const methodEl = document.getElementById('uplMethod') as HTMLSelectElement;
+      const refEl = document.getElementById('uplReference') as HTMLInputElement;
+      const autoPayRow = document.getElementById('uplAutoPayRow') as HTMLElement;
+      const chkAutoReceipt = document.getElementById('chkUplAutoRecordReceipt') as HTMLInputElement;
+      const previewEl = document.getElementById('uplAutoEntriesPreview') as HTMLElement;
+      const batchContainer = document.getElementById('uplBatchContainer') as HTMLElement;
+      const batchTbody = document.getElementById('uplBatchTbody') as HTMLElement;
+      const batchBadge = document.getElementById('uplBatchCountBadge') as HTMLElement;
+      const singleFields = document.getElementById('uplSingleFields') as HTMLElement;
+
+      const updatePreview = () => {
+        if (batchRows.length > 0) {
+          const sel = batchRows.filter(r => r.selected);
+          const total = sel.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+          previewEl.innerHTML = `<strong>Automatic Batch Entries (${sel.length} of ${batchRows.length} rows selected · GH₵ ${total.toFixed(2)}):</strong> Each selected row will automatically create/link its Customer, Property, Completed Service Job, Quotation/Invoice/Receipt, and update all 6 Reconciliation Control Totals.`;
+          return;
+        }
+        const t = docTypeEl.value as UploadedDocumentPayload['docType'];
+        autoPayRow.style.display = t === 'invoice' ? 'flex' : 'none';
+        if (t === 'quotation') {
+          previewEl.innerHTML = `<strong>Automatic Accounting &amp; Operational Entries:</strong><br/>1. Find or create <strong>Customer</strong> &amp; <strong>Property</strong> &rarr; 2. Create <strong>Service Job</strong> &rarr; 3. Post <strong>Approved Quotation (Q00xx)</strong> &amp; <strong>Quote Line Item</strong> ready for PDF printing.`;
+        } else if (t === 'invoice') {
+          const withRec = chkAutoReceipt?.checked;
+          previewEl.innerHTML = `<strong>Automatic Accounting &amp; Operational Entries:</strong><br/>1. Find or create <strong>Customer</strong> &amp; <strong>Property</strong> &rarr; 2. Create Completed <strong>Service Job</strong> &rarr; 3. Post <strong>Tax Invoice (INV00xx)</strong> to Revenue &amp; AR Ledger${withRec ? ' &rarr; 4. Post <strong>Reconciled Payment Receipt (PAY00xx)</strong> to Cash Ledger' : ''}.`;
+        } else if (t === 'payment_receipt') {
+          previewEl.innerHTML = `<strong>Automatic Accounting &amp; Operational Entries:</strong><br/>1. Match open Customer Invoice (or auto-create Customer, Job &amp; backing Tax Invoice if none exists) &rarr; 2. Post <strong>Reconciled Official Payment Receipt (PAY00xx)</strong> &rarr; 3. Update Invoice Paid/Balance status &amp; Cash Control Totals.`;
+        } else {
+          previewEl.innerHTML = `<strong>Automatic Accounting &amp; Operational Entries:</strong><br/>1. Post <strong>Approved &amp; Reconciled Expense Voucher (EXP00xx)</strong> &rarr; 2. Link to Cost Category &amp; Job Costing &rarr; 3. Update Income Statement &amp; Cash Outflow Control Totals.`;
+        }
+      };
+
+      const renderBatchTable = () => {
+        if (batchRows.length === 0) {
+          batchContainer.style.display = 'none';
+          singleFields.style.display = 'block';
+          updatePreview();
+          return;
+        }
+        batchContainer.style.display = 'block';
+        singleFields.style.display = 'none';
+        const selectedCount = batchRows.filter(r => r.selected).length;
+        batchBadge.textContent = `${selectedCount} of ${batchRows.length} selected`;
+
+        batchTbody.innerHTML = batchRows.map((row, idx) => `
+          <tr class="upl-batch-row" data-idx="${idx}" style="cursor: pointer; background: ${row.selected ? 'rgba(45, 79, 62, 0.08)' : 'transparent'};">
+            <td style="text-align: center;"><input type="checkbox" class="chk-upl-row" data-idx="${idx}" ${row.selected ? 'checked' : ''} style="cursor: pointer;" /></td>
+            <td><span class="badge-pill badge-neutral">${this.escapeHtml(row.docType)}</span></td>
+            <td style="font-weight: 600;">${this.escapeHtml(row.partyName)}</td>
+            <td>${this.escapeHtml(row.description)}</td>
+            <td class="num" style="font-weight: 700;">${Number(row.amount).toFixed(2)}</td>
+            <td>${this.escapeHtml(row.date || today)}</td>
+          </tr>
+        `).join('');
+
+        batchTbody.querySelectorAll('.upl-batch-row').forEach(tr => {
+          tr.addEventListener('click', (ev) => {
+            const target = ev.target as HTMLElement;
+            if (target.tagName === 'INPUT') return;
+            const idx = Number(tr.getAttribute('data-idx'));
+            if (!isNaN(idx) && batchRows[idx]) {
+              batchRows[idx].selected = !batchRows[idx].selected;
+              renderBatchTable();
+            }
+          });
+        });
+
+        batchTbody.querySelectorAll('.chk-upl-row').forEach(chk => {
+          chk.addEventListener('change', (ev) => {
+            const input = ev.target as HTMLInputElement;
+            const idx = Number(input.getAttribute('data-idx'));
+            if (!isNaN(idx) && batchRows[idx]) {
+              batchRows[idx].selected = input.checked;
+              renderBatchTable();
+            }
+          });
+        });
+
+        updatePreview();
+      };
+
+      document.getElementById('chkUplBatchAll')?.addEventListener('change', (ev) => {
+        const checked = (ev.target as HTMLInputElement).checked;
+        batchRows.forEach(r => { r.selected = checked; });
+        renderBatchTable();
+      });
+
+      docTypeEl.addEventListener('change', updatePreview);
+      chkAutoReceipt?.addEventListener('change', updatePreview);
+      updatePreview();
+
+      // Smart File Parser
+      const fileInput = document.getElementById('uplFileInput') as HTMLInputElement;
+      const fileStatus = document.getElementById('uplFileStatus') as HTMLElement;
+      fileInput?.addEventListener('change', () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        uploadedFileName = file.name;
+        const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+
+        const lowerName = file.name.toLowerCase();
+        if (lowerName.includes('quot') || lowerName.includes('est')) {
+          docTypeEl.value = 'quotation';
+        } else if (lowerName.includes('rec') || lowerName.includes('pay')) {
+          docTypeEl.value = 'payment_receipt';
+        } else if (lowerName.includes('exp') || lowerName.includes('bill') || lowerName.includes('voucher')) {
+          docTypeEl.value = 'expense_receipt';
+        } else if (lowerName.includes('inv')) {
+          docTypeEl.value = 'invoice';
+        }
+
+        if (!refEl.value) refEl.value = `UPL-${file.name.slice(0, 18).toUpperCase()}`;
+        if (!descEl.value) descEl.value = `Uploaded: ${baseName}`;
+
+        if (lowerName.endsWith('.csv') || lowerName.endsWith('.txt') || lowerName.endsWith('.json')) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const text = String(reader.result || '').trim();
+            // Try JSON array or object first
+            if (lowerName.endsWith('.json')) {
+              try {
+                const parsed = JSON.parse(text);
+                const arr = Array.isArray(parsed) ? parsed : [parsed];
+                if (arr.length > 1) {
+                  batchRows = arr.map((item: any) => ({
+                    docType: (item.docType || item.type || docTypeEl.value) as UploadedDocumentPayload['docType'],
+                    partyName: String(item.partyName || item.customer || item.client || item.vendor || 'Walk-In Client'),
+                    description: String(item.description || item.service || 'Uploaded service item'),
+                    amount: Number(item.amount || item.total || 500),
+                    date: String(item.date || today),
+                    category: String(item.category || 'General Repairs'),
+                    area: String(item.area || 'East Legon'),
+                    paymentMethod: (item.paymentMethod || 'Mobile Money') as any,
+                    reference: String(item.reference || ''),
+                    fileName: file.name,
+                    selected: true
+                  }));
+                  fileStatus.textContent = `Loaded ${batchRows.length} rows from ${file.name}`;
+                  renderBatchTable();
+                  return;
+                } else if (arr.length === 1) {
+                  const item = arr[0];
+                  if (item.partyName || item.customer) partyEl.value = item.partyName || item.customer;
+                  if (item.description || item.service) descEl.value = item.description || item.service;
+                  if (item.amount || item.total) amountEl.value = String(item.amount || item.total);
+                }
+              } catch {
+                // fallback to text extraction
+              }
+            }
+
+            // Check if multi-line CSV
+            const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            if (lowerName.endsWith('.csv') && lines.length >= 2) {
+              const dataLines = lines[0].toLowerCase().includes('amount') || lines[0].toLowerCase().includes('name') || lines[0].toLowerCase().includes('client')
+                ? lines.slice(1)
+                : lines;
+              if (dataLines.length >= 1) {
+                batchRows = dataLines.map((line) => {
+                  const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+                  const rawType = (cols[0] || '').toLowerCase();
+                  let dType: UploadedDocumentPayload['docType'] = docTypeEl.value as any;
+                  if (rawType.includes('quot')) dType = 'quotation';
+                  else if (rawType.includes('inv')) dType = 'invoice';
+                  else if (rawType.includes('exp')) dType = 'expense_receipt';
+                  else if (rawType.includes('rec') || rawType.includes('pay')) dType = 'payment_receipt';
+
+                  const hasTypeCol = ['quotation', 'quote', 'invoice', 'receipt', 'payment_receipt', 'expense', 'expense_receipt'].some(k => rawType.includes(k));
+                  const party = hasTypeCol ? (cols[1] || 'Client') : (cols[0] || 'Client');
+                  const desc = hasTypeCol ? (cols[2] || 'Maintenance Service') : (cols[1] || 'Maintenance Service');
+                  const amtStr = hasTypeCol ? (cols[3] || '0') : (cols[2] || '0');
+                  const dt = hasTypeCol ? (cols[4] || today) : (cols[3] || today);
+                  const amt = parseFloat(amtStr.replace(/[^0-9.]/g, '')) || 450;
+
+                  return {
+                    docType: dType,
+                    partyName: party,
+                    description: desc,
+                    amount: amt,
+                    date: /^\d{4}-\d{2}-\d{2}$/.test(dt) ? dt : today,
+                    category: catEl.value,
+                    area: areaEl.value || 'Accra',
+                    paymentMethod: methodEl.value as any,
+                    fileName: file.name,
+                    selected: true
+                  };
+                });
+                fileStatus.textContent = `Parsed ${batchRows.length} selectable rows from ${file.name}`;
+                renderBatchTable();
+                return;
+              }
+            }
+
+            // Single text extraction
+            const amountMatch = text.match(/(?:GH₵|GHS|Amount|Total)[:\s]*([0-9,]+(?:\.[0-9]{1,2})?)/i) || text.match(/\b([0-9]{2,6}\.[0-9]{2})\b/);
+            if (amountMatch && !amountEl.value) {
+              amountEl.value = amountMatch[1].replace(/,/g, '');
+            }
+            const clientMatch = text.match(/(?:Client|Customer|Bill To|Received From|Vendor)[:\s]+([^\r\n]+)/i);
+            if (clientMatch && !partyEl.value) {
+              partyEl.value = clientMatch[1].trim();
+            }
+          };
+          reader.readAsText(file);
+        } else {
+          // Filename heuristics for PDF/Images
+          const numMatch = baseName.match(/\b([0-9]{2,6}(?:\.[0-9]{1,2})?)\b/);
+          if (numMatch && !amountEl.value) {
+            amountEl.value = numMatch[1];
+          }
+          if (!partyEl.value && state.customers[0]) {
+            const matchedCust = state.customers.find(c => baseName.toLowerCase().includes(c.customerName.toLowerCase().split(' ')[0]));
+            if (matchedCust) partyEl.value = matchedCust.customerName;
+          }
+        }
+
+        fileStatus.textContent = `Attached: ${file.name} (${(file.size / 1024).toFixed(1)} KB) — fields auto-populated`;
+        updatePreview();
+      });
+
+      document.getElementById('formSmartUpload')?.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        try {
+          const openPrintSuite = (document.getElementById('chkUplOpenPrintSuite') as HTMLInputElement)?.checked;
+          const createdDocKeys: string[] = [];
+
+          if (batchRows.length > 0) {
+            const selected = batchRows.filter(r => r.selected);
+            if (selected.length === 0) {
+              alert('Please select at least one row in the batch table.');
+              return;
+            }
+            for (const row of selected) {
+              const res = opsStore.autoPostUploadedDocument(row);
+              if (res.documentType === 'quote') createdDocKeys.push(`quote:${res.primaryId}`);
+              else if (res.documentType === 'invoice') createdDocKeys.push(`invoice:${res.primaryId}`);
+              else if (res.documentType === 'receipt') createdDocKeys.push(`receipt:${res.primaryId}`);
+            }
+          } else {
+            const payload: UploadedDocumentPayload = {
+              docType: docTypeEl.value as UploadedDocumentPayload['docType'],
+              partyName: partyEl.value.trim(),
+              description: descEl.value.trim(),
+              amount: parseFloat(amountEl.value) || 0,
+              date: dateEl.value || today,
+              category: catEl.value,
+              area: areaEl.value.trim() || 'Accra',
+              paymentMethod: methodEl.value as any,
+              reference: refEl.value.trim(),
+              fileName: uploadedFileName || undefined,
+              autoRecordReceiptForInvoice: docTypeEl.value === 'invoice' && Boolean(chkAutoReceipt?.checked)
+            };
+            const res = opsStore.autoPostUploadedDocument(payload);
+            if (res.documentType === 'quote') createdDocKeys.push(`quote:${res.primaryId}`);
+            else if (res.documentType === 'invoice') createdDocKeys.push(`invoice:${res.primaryId}`);
+            else if (res.documentType === 'receipt') createdDocKeys.push(`receipt:${res.primaryId}`);
+          }
+
+          this.closeModal();
+          if (openPrintSuite && createdDocKeys.length > 0) {
+            this.printDocFilter = 'all';
+            createdDocKeys.forEach(k => this.selectedPrintDocKeys.add(k));
+            this.currentTab = 'print';
+          }
+          this.render();
+        } catch (err: any) {
+          alert(err?.message || 'Failed to process uploaded document.');
+        }
+      });
+    });
+  }
+
+  private escapeHtml(str?: string): string {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   private showModal(html: string, onMounted: () => void): void {

@@ -259,6 +259,91 @@ export function renderPrintInvoiceHtml(
   `;
 }
 
+export function renderPrintReceiptHtml(
+  payment: Payment,
+  invoice: Invoice | undefined,
+  customer: Customer,
+  settings: SystemSettings
+): string {
+  const currency = settings.currencySymbol;
+  const remainingBalance = invoice ? roundMoney(invoice.balance || 0) : 0;
+
+  return `
+    <div class="printable-doc" style="max-width: 800px; margin: 0 auto; background: #ffffff; padding: 40px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b; line-height: 1.5;">
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #075545; padding-bottom: 24px; margin-bottom: 24px;">
+        <div>
+          <h1 style="font-size: 24px; font-weight: 800; color: #075545; margin: 0 0 4px 0;">${settings.companyName}</h1>
+          <p style="font-size: 13px; color: #E4693F; font-weight: 600; margin: 0 0 12px 0;">${settings.tagline}</p>
+          <p style="font-size: 12px; color: #64748b; margin: 0;">${settings.address}</p>
+          <p style="font-size: 12px; color: #64748b; margin: 0;">Phone: ${settings.phone} | Email: ${settings.email}</p>
+        </div>
+        <div style="text-align: right;">
+          <span style="display: inline-block; background: #15803d; color: #ffffff; font-size: 14px; font-weight: 700; padding: 6px 16px; border-radius: 4px; text-transform: uppercase; letter-spacing: 1px;">OFFICIAL RECEIPT</span>
+          <p style="font-size: 15px; font-weight: 700; color: #1e293b; margin: 12px 0 2px 0;">Receipt No: ${payment.paymentId}</p>
+          <p style="font-size: 12px; color: #64748b; margin: 0;">Date: ${payment.paymentDate}</p>
+          <p style="font-size: 12px; color: #075545; font-weight: 600; margin: 2px 0 0 0;">Invoice Ref: ${payment.invoiceNo}</p>
+        </div>
+      </div>
+
+      <!-- Received From -->
+      <div style="display: flex; justify-content: space-between; background: #FAF8F4; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px 22px; margin-bottom: 28px;">
+        <div>
+          <h4 style="font-size: 11px; text-transform: uppercase; color: #64748b; margin: 0 0 6px 0; letter-spacing: 0.5px;">Received With Thanks From</h4>
+          <p style="font-size: 16px; font-weight: 700; color: #1e293b; margin: 0 0 4px 0;">${customer.customerName}</p>
+          <p style="font-size: 13px; color: #475569; margin: 0;">Phone: ${customer.phone || 'On file'} &bull; Area: ${customer.area}</p>
+        </div>
+        <div style="text-align: right;">
+          <h4 style="font-size: 11px; text-transform: uppercase; color: #64748b; margin: 0 0 6px 0; letter-spacing: 0.5px;">Amount Received</h4>
+          <p style="font-size: 24px; font-weight: 800; color: #15803d; margin: 0;">${currency}${roundMoney(payment.amount).toFixed(2)}</p>
+          <p style="font-size: 12px; color: #475569; margin: 2px 0 0 0;">Method: <strong>${payment.method}</strong> (${payment.reference || 'Verified'})</p>
+        </div>
+      </div>
+
+      <!-- Payment Breakdown Table -->
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+        <thead>
+          <tr style="background: #f8fafc; border-top: 1px solid #e2e8f0; border-bottom: 2px solid #cbd5e1;">
+            <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase;">Invoice Reference</th>
+            <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase;">Payment Channel &amp; Ref</th>
+            <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase;">Amount Paid</th>
+            <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase;">Remaining Invoice Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: #075545;">
+              ${payment.invoiceNo} ${invoice?.notes ? `<div style="font-size: 11px; font-weight: 400; color: #64748b;">${invoice.notes}</div>` : ''}
+            </td>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; color: #334155;">
+              ${payment.method} &mdash; <span style="font-family: monospace;">${payment.reference || 'N/A'}</span>
+            </td>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 700; color: #15803d;">
+              ${currency}${roundMoney(payment.amount).toFixed(2)}
+            </td>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 700; color: ${remainingBalance > 0 ? '#b91c1c' : '#15803d'};">
+              ${currency}${remainingBalance.toFixed(2)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Sign-off Block -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 36px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px;">
+        <div>
+          <p style="margin: 0 0 4px 0; color: #64748b;">Received &amp; Verified By:</p>
+          <p style="margin: 0; font-weight: 700; color: #075545;">${payment.receivedBy || settings.companyName}</p>
+          <p style="margin: 2px 0 0 0; font-size: 11px; color: #15803d;">Status: ${payment.reconciliationStatus || 'Reconciled'}</p>
+        </div>
+        <div style="text-align: right; color: #64748b;">
+          <p style="margin: 0;">Thank you for your payment.</p>
+          <p style="margin: 2px 0 0 0; font-weight: 600; color: #075545;">${settings.companyName} &bull; ${settings.tagline}</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 export function renderPrintInspectionHtml(
   inspection: PropertyInspection,
   property: Property | undefined,

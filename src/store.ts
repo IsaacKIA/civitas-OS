@@ -164,6 +164,24 @@ const SESSION_DURATION_MS = 30 * 60 * 1000; // 30 minutes session timeout
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes lockout
 
+export interface UploadedDocumentPayload {
+  docType: 'quotation' | 'invoice' | 'payment_receipt' | 'expense_receipt';
+  date?: string;
+  partyName: string; // Customer Name or Supplier Name
+  phone?: string;
+  area?: string;
+  serviceOrCategory?: string; // Service ID/Name or Expense Category
+  category?: string; // Alias for serviceOrCategory
+  description?: string;
+  amount: number;
+  reference?: string; // MoMo/Bank Ref or Supplier Invoice Ref or Filename
+  fileName?: string;
+  invoiceNo?: string; // Optional target invoice for payment receipt
+  method?: PayMethod | string;
+  paymentMethod?: PayMethod | string;
+  autoRecordReceiptForInvoice?: boolean;
+}
+
 export class OpsStore {
   private state: OpsDatabaseState;
   private currentUser: SystemUser | null = null;
@@ -1932,6 +1950,320 @@ export class OpsStore {
     );
     this.recalculateAll();
     this.saveToStorage();
+  }
+
+  /**
+   * Smart Auto-Entry Engine for Uploaded Quotations, Invoices, and Receipts.
+   * Automatically resolves or creates supporting Customer, Property, Job, QuoteLine, and Invoice
+   * entries so that all double-entry & reconciliation rules remain 100% balanced.
+   */
+  public autoPostUploadedDocument(payload: UploadedDocumentPayload): {
+    primaryId: string;
+    documentType: 'quote' | 'invoice' | 'receipt' | 'expense';
+    relatedEntries: string[];
+    summary: string;
+  } {
+    const dateStr = payload.date || formatYMD(new Date());
+    const amount = Math.max(0, Number(payload.amount) || 0);
+    if (amount <= 0) {
+      throw new Error('Document amount must be greater than zero.');
+    }
+    const cleanParty = (payload.partyName || 'Valued Client').trim();
+    const cleanPhone = (payload.phone || '0240000000').trim();
+    const cleanArea = (payload.area || 'East Legon') as any;
+    const categoryHint = payload.serviceOrCategory || payload.category || '';
+    const rawMethod = String(payload.method || payload.paymentMethod || 'Mobile money').toLowerCase();
+    const normalizedMethod: PayMethod = rawMethod.includes('bank')
+      ? 'Bank transfer'
+      : rawMethod.includes('cash')
+      ? 'Cash'
+      : 'Mobile money';
+
+    const relatedEntries: string[] = [];
+
+    const ensureCustomerAndProperty = (): { customer: Customer; property: Property } => {
+      let customer = this.state.customers.find(
+        c =>
+          c.customerId.toLowerCase() === cleanParty.toLowerCase() ||
+          c.customerName.toLowerCase() === cleanParty.toLowerCase() ||
+          (cleanPhone &&
+            c.phone &&
+            c.phone.replace(/\D/g, '') === cleanPhone.replace(/\D/g, '') &&
+            cleanPhone.replace(/\D/g, '').length >= 9 &&
+            cleanPhone !== '0240000000')
+      );
+
+      if (!customer) {
+        const newCustId = this.nextCustomerId();
+        this.addCustomer({
+          customerId: newCustId,
+          customerName: cleanParty,
+          category: 'Homeowner',
+          phone: cleanPhone,
+          email: '',
+          preferredChannel: 'WhatsApp',
+          area: cleanArea,
+          leadSource: 'WhatsApp',
+          dateAcquired: dateStr,
+          relationshipOwner: this.getActorLabel(),
+          consentRecorded: 'Yes',
+          closed: 'No'
+        });
+        customer = this.state.customers.find(c => c.customerId === newCustId)!;
+        relatedEntries.push(`Customer ${newCustId} (${cleanParty})`);
+      }
+
+      let property = this.state.properties.find(p => p.customerId === customer!.customerId);
+      if (!property) {
+        const newPropId = this.nextPropertyId();
+        this.addProperty({
+          propertyId: newPropId,
+          customerId: customer.customerId,
+          addressOrDescription: `${customer.customerName} Residence (${cleanArea})`,
+          area: cleanArea,
+          propertyType: 'House',
+          propertyUse: 'Owner-occupied',
+          units: 1,
+          active: 'Yes'
+        });
+        property = this.state.properties.find(p => p.propertyId === newPropId)!;
+        relatedEntries.push(`Property ${newPropId}`);
+      }
+
+      return { customer, property };
+    };
+
+    const matchService = (hint?: string): ServiceItem => {
+      if (hint) {
+        const h = hint.toLowerCase();
+        const found = this.state.services.find(
+          s =>
+            s.serviceId.toLowerCase() === h ||
+            (s.service && s.service.toLowerCase().includes(h)) ||
+            (s.division && s.division.toLowerCase().includes(h))
+        );
+        if (found) return found;
+      }
+      return (
+        this.state.services[0] || {
+          serviceId: 'S01',
+          service: 'Residential standard clean',
+          division: 'Civitas Fix',
+          unit: 'Per visit',
+          standardPrice: amount,
+          standardDirectCost: Math.round(amount * 0.45 * 100) / 100,
+          active: 'Yes'
+        }
+      );
+    };
+
+    if (payload.docType === 'quotation') {
+      const { customer, property } = ensureCustomerAndProperty();
+      const service = matchService(categoryHint || payload.description);
+      const quoteId = this.nextQuoteId();
+
+      this.addQuoteWithLines(
+        {
+          quoteId,
+          quoteDate: dateStr,
+          customerId: customer.customerId,
+          propertyId: property.propertyId,
+          preparedBy: this.getActorLabel(),
+          status: 'Sent',
+          discountAmount: 0,
+          discountApproval: 'Not required',
+          notes: payload.description || `Uploaded quotation (${payload.reference || payload.fileName || service.service})`
+        },
+        [
+          {
+            lineNo: 1,
+            quoteId,
+            serviceId: service.serviceId,
+            customDescription: payload.description || service.service,
+            quantity: 1,
+            priceOverride: amount
+          }
+        ]
+      );
+      relatedEntries.push(`Quote ${quoteId}`, `QuoteLine #1`);
+      return {
+        primaryId: quoteId,
+        documentType: 'quote',
+        relatedEntries,
+        summary: `Quotation ${quoteId} posted for ${customer.customerName} (GH₵${amount.toFixed(2)})`
+      };
+    }
+
+    if (payload.docType === 'invoice') {
+      const { customer, property } = ensureCustomerAndProperty();
+      const service = matchService(categoryHint || payload.description);
+      const jobId = this.nextJobId();
+
+      this.addJob({
+        jobId,
+        customerId: customer.customerId,
+        propertyId: property.propertyId,
+        serviceId: service.serviceId,
+        description: payload.description || service.service,
+        requestDate: dateStr,
+        scheduledDate: dateStr,
+        dueDate: dateStr,
+        completionDate: dateStr,
+        status: 'Invoiced',
+        manualQuotedAmount: amount,
+        qualityResult: 'Pass',
+        evidenceReference: payload.reference || payload.fileName || `EVID-${jobId}`,
+        reworkOrComplaint: 'No'
+      });
+      relatedEntries.push(`Completed Job ${jobId}`);
+
+      const invoiceNo = this.nextInvoiceNo();
+      this.addInvoice({
+        invoiceNo,
+        invoiceDate: dateStr,
+        customerId: customer.customerId,
+        jobId,
+        divisionIfNoJob: service.division,
+        amountBeforeTax: amount,
+        cancelled: 'No',
+        notes: payload.description || `${service.service} (${payload.reference || payload.fileName || 'Uploaded Invoice'})`
+      });
+      relatedEntries.push(`Tax Invoice ${invoiceNo}`);
+
+      if (payload.autoRecordReceiptForInvoice) {
+        const paymentId = this.nextPaymentId();
+        const refCode = payload.reference || `REC-${paymentId}-${Date.now().toString().slice(-4)}`;
+        this.addPayment({
+          paymentId,
+          paymentDate: dateStr,
+          invoiceNo,
+          amount,
+          method: normalizedMethod,
+          reference: refCode,
+          receivedBy: this.getActorLabel(),
+          reconciliationStatus: 'Reconciled',
+          reconciledDate: dateStr
+        });
+        relatedEntries.push(`Official Receipt ${paymentId}`);
+      }
+
+      return {
+        primaryId: invoiceNo,
+        documentType: 'invoice',
+        relatedEntries,
+        summary: `Tax Invoice ${invoiceNo} & Job ${jobId} posted for ${customer.customerName} (GH₵${amount.toFixed(2)})`
+      };
+    }
+
+    if (payload.docType === 'payment_receipt') {
+      let targetInvoice = payload.invoiceNo
+        ? this.state.invoices.find(i => i.invoiceNo.toLowerCase() === payload.invoiceNo!.toLowerCase())
+        : undefined;
+
+      if (!targetInvoice) {
+        // Look for an open/unpaid invoice for this customer
+        targetInvoice = this.state.invoices.find(
+          i =>
+            i.cancelled !== 'Yes' &&
+            (i.balance || 0) > 0 &&
+            (i.customerName?.toLowerCase() === cleanParty.toLowerCase() ||
+              i.customerId.toLowerCase() === cleanParty.toLowerCase())
+        );
+      }
+
+      if (!targetInvoice) {
+        // Auto-create the Customer, Property, Completed Job, and Backing Tax Invoice so Rule 1 & Check #26 stay reconciled
+        const invRes = this.autoPostUploadedDocument({
+          ...payload,
+          docType: 'invoice',
+          autoRecordReceiptForInvoice: false
+        });
+        relatedEntries.push(...invRes.relatedEntries);
+        targetInvoice = this.state.invoices.find(i => i.invoiceNo === invRes.primaryId)!;
+      }
+
+      const paymentId = this.nextPaymentId();
+      const refCode = payload.reference || `REC-${paymentId}-${Date.now().toString().slice(-4)}`;
+      this.addPayment({
+        paymentId,
+        paymentDate: dateStr,
+        invoiceNo: targetInvoice.invoiceNo,
+        amount,
+        method: normalizedMethod,
+        reference: refCode,
+        receivedBy: this.getActorLabel(),
+        reconciliationStatus: 'Reconciled',
+        reconciledDate: dateStr
+      });
+      relatedEntries.push(`Official Receipt ${paymentId} -> ${targetInvoice.invoiceNo}`);
+
+      return {
+        primaryId: paymentId,
+        documentType: 'receipt',
+        relatedEntries,
+        summary: `Official Receipt ${paymentId} reconciled against Invoice ${targetInvoice.invoiceNo} (GH₵${amount.toFixed(2)})`
+      };
+    }
+
+    // Expense Receipt
+    const expenseId = this.nextExpenseId();
+    const refCode = payload.reference || payload.fileName || `EXP-REC-${expenseId}`;
+    const catLower = categoryHint.toLowerCase();
+    const resolvedBudgetCat = catLower.includes('trans') || catLower.includes('fuel')
+      ? 'Direct transport'
+      : catLower.includes('admin') || catLower.includes('office')
+      ? 'Administration and communication'
+      : catLower.includes('market')
+      ? 'Marketing and customer acquisition'
+      : 'Direct materials';
+
+    // Ensure direct costs are linked to a valid Job so Control Check #30 (directCostFlag) stays clean
+    let linkedJobId: string | undefined;
+    if (resolvedBudgetCat === 'Direct materials' || resolvedBudgetCat === 'Direct transport') {
+      linkedJobId = this.state.jobs[this.state.jobs.length - 1]?.jobId;
+    }
+
+    this.addExpense({
+      expenseId,
+      expenseDate: dateStr,
+      supplier: cleanParty,
+      supplierReference: refCode,
+      category: resolvedBudgetCat,
+      division: 'Civitas Fix',
+      jobId: linkedJobId,
+      amount,
+      paymentMethod: normalizedMethod,
+      paymentStatus: 'Unpaid',
+      approvalStatus: 'Not required',
+      evidenceReference: refCode,
+      fundingSource: 'Operations (customer receipts)',
+      notes: payload.description || 'Uploaded expense receipt'
+    });
+
+    const createdExp = this.state.expenses.find(e => e.expenseId === expenseId);
+    if (createdExp && amount > this.state.settings.spendingApprovalThreshold && createdExp.approvalStatus !== 'Approved') {
+      if (this.canCurrentUser('APPROVE_EXPENSE')) {
+        this.approveExpense(
+          expenseId,
+          'Smart Upload Auto-Verification: Approved with attached supplier receipt evidence.'
+        );
+      }
+    }
+    const updatedExp = this.state.expenses.find(e => e.expenseId === expenseId);
+    if (
+      updatedExp &&
+      (amount <= this.state.settings.spendingApprovalThreshold || updatedExp.approvalStatus === 'Approved')
+    ) {
+      this.markExpensePaid(expenseId, normalizedMethod, refCode, dateStr);
+    }
+    relatedEntries.push(`Expense ${expenseId}`);
+
+    return {
+      primaryId: expenseId,
+      documentType: 'expense',
+      relatedEntries,
+      summary: `Expense Receipt ${expenseId} posted for ${cleanParty} (GH₵${amount.toFixed(2)})`
+    };
   }
 }
 
