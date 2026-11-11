@@ -340,189 +340,123 @@ class OpsApp {
   }
 
   // ==========================================
-  // STAGE 1: EXECUTIVE LANDING PAGE
+  // STAGE 1: ICONIC MINIMALIST LANDING PAGE
   // ==========================================
   private renderLandingScreen(
     state: OpsDatabaseState,
-    mgmt: ReturnType<typeof opsStore.getManagementAccounts>,
+    _mgmt: ReturnType<typeof opsStore.getManagementAccounts>,
     evaluation: ReturnType<typeof opsStore.getChecksEvaluation>,
-    currency: string
+    _currency: string
   ): string {
     const activeUser = opsStore.getCurrentUser();
-    const usersCount = opsStore.getUsers().filter(u => u.status === 'Active').length;
     const reconciledTotals = evaluation.controlTotals.filter(t => t.status === 'RECONCILED').length;
 
     return `
       <div class="landing-shell">
-        <!-- Top Brand Bar -->
-        <header style="background: #032b24; color: #ffffff; padding: 14px 24px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-          <div class="landing-container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <!-- Minimalist Top Navigation -->
+        <header class="landing-nav">
+          <div class="landing-container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
             <div style="display: flex; align-items: center; gap: 12px;">
-              <div style="width: 36px; height: 36px; border-radius: 8px; background: var(--brand-terracotta); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 18px; color: #ffffff;">
-                C
-              </div>
+              <img src="/assets/logos/Civitas_Symbol_256.png" alt="Civitas Symbol" style="width: 34px; height: 34px; object-fit: contain;" />
               <div>
-                <div style="font-size: 16px; font-weight: 800; letter-spacing: -0.3px;">${state.settings.companyName}</div>
-                <div style="font-size: 11px; color: #fed7aa; font-weight: 600;">${state.settings.tagline} &bull; Accra &amp; Tema, Ghana</div>
+                <div style="font-family: var(--font-serif); font-size: 19px; font-weight: 700; color: #043D33; letter-spacing: -0.01em; line-height: 1.1;">
+                  ${state.settings.companyName}
+                </div>
+                <div style="font-size: 11px; color: #64748b; font-weight: 500; letter-spacing: 0.3px;">
+                  Accra &amp; Tema, Ghana
+                </div>
               </div>
             </div>
 
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <a href="https://www.civitasestate.com" target="_blank" class="btn-brand-outline" style="color: #ffffff; border-color: rgba(255,255,255,0.3); font-size: 12px; text-decoration: none;">
-                www.civitasestate.com &nearr;
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <a href="https://www.civitasestate.com" target="_blank" rel="noopener" style="color: #475569; font-size: 12px; font-weight: 600; text-decoration: none; padding: 6px 10px;">
+                civitasestate.com &nearr;
               </a>
               ${activeUser ? `
-                <button id="btnLandingResumeDashboard" class="btn-brand-terracotta" style="font-size: 12px; padding: 9px 16px;">
-                  Continue as ${activeUser.fullName} (${activeUser.role}) &rarr;
+                <button id="btnLandingResumeDashboard" class="btn-iconic-secondary" style="padding: 9px 18px; font-size: 12px;">
+                  Resume as ${activeUser.fullName} &rarr;
                 </button>
               ` : ''}
-              <button id="btnLandingToLogin" class="btn-brand-primary" style="background: #10b981; font-size: 12px; padding: 9px 18px;">
-                Staff &amp; Governance Sign In &rarr;
+              <button id="btnLandingToLogin" class="btn-iconic-primary" style="padding: 9px 22px; font-size: 12px; box-shadow: none;">
+                Sign In &rarr;
               </button>
             </div>
           </div>
         </header>
 
-        <!-- Hero Section -->
-        <section class="landing-hero">
+        <!-- Iconic Centerpiece Hero -->
+        <main class="landing-centerpiece">
           <div class="landing-container">
-            <div style="max-width: 780px;">
-              <div class="landing-pill">
-                <span>●</span> Internal Operations, Accounting &amp; Governance Control System
-              </div>
-              <h1 style="font-family: var(--font-serif); font-size: 44px; font-weight: 700; line-height: 1.12; margin: 0 0 18px 0; color: #ffffff;">
-                Institutional Discipline for Property Care &amp; Estate Maintenance in Ghana.
-              </h1>
-              <p style="font-size: 16px; color: #e2e8f0; line-height: 1.65; margin: 0 0 28px 0;">
-                Built for <strong>Civitas Estate &amp; Maintenance</strong> across Greater Accra and Tema. Unifying customer onboarding, vetted field workforce dispatch, diaspora <em>Property Watch</em> condition reporting, NEIP grant accountability, and 52 audit-grade internal controls under strict role-based governance.
-              </p>
-
-              <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-                <button id="btnHeroLogin" class="btn-brand-terracotta" style="font-size: 14px; padding: 13px 26px; box-shadow: 0 10px 25px rgba(228, 105, 63, 0.35);">
-                  Access Staff Login Portal &rarr;
-                </button>
-                <button id="btnHeroDemoLogin" class="btn-brand-outline" style="color: #ffffff; border-color: rgba(255,255,255,0.45); font-size: 13px; padding: 12px 20px;">
-                  Preload Verified Demo Dataset &amp; Sign In
-                </button>
-              </div>
+            <!-- Authentic Civitas Emblem on Porcelain Medallion -->
+            <div class="landing-emblem-frame">
+              <img
+                src="/assets/logos/Civitas_Official_Logo_Transparent.png"
+                alt="${state.settings.companyName}"
+                class="landing-emblem-logo"
+              />
             </div>
 
-            <!-- Live Governance & System Pulse Strip -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 44px; padding-top: 28px; border-top: 1px solid rgba(255,255,255,0.15);">
-              <div style="background: rgba(0,0,0,0.22); padding: 14px 18px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
-                <div style="font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 700;">Governance RBAC</div>
-                <div style="font-size: 22px; font-weight: 800; color: #ffffff; margin-top: 2px;">${usersCount} Active Roles</div>
-                <div style="font-size: 11px; color: #fed7aa;">Segregation of Duties Enforced</div>
+            <div>
+              <span class="landing-overline">Smart Living &bull; Sustainable Legacy</span>
+            </div>
+
+            <h1 class="landing-headline">
+              The Standard of <em>Property Care</em> &amp; Estate Stewardship.
+            </h1>
+
+            <p class="landing-subheadline">
+              Executive operations, vetted artisan dispatch, diaspora property watch, and institutional financial governance for Greater Accra &amp; Tema.
+            </p>
+
+            <!-- Primary & Secondary Entry Actions -->
+            <div class="landing-cta-group">
+              <button id="btnHeroLogin" class="btn-iconic-primary">
+                Enter Executive Portal &rarr;
+              </button>
+              <button id="btnHeroDemoLogin" class="btn-iconic-secondary">
+                Explore Interactive Sandbox
+              </button>
+            </div>
+
+            <!-- Three Iconic Service Pillars -->
+            <div class="landing-pillars">
+              <div class="landing-pillar-card">
+                <span class="landing-pillar-num">01 &mdash; Civitas Fix</span>
+                <h3 class="landing-pillar-title">Repairs &amp; Deep Cleaning</h3>
+                <p class="landing-pillar-desc">
+                  On-demand electrical, plumbing, AC servicing, painting, and post-construction cleaning by vetted specialists.
+                </p>
               </div>
-              <div style="background: rgba(0,0,0,0.22); padding: 14px 18px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
-                <div style="font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 700;">Automated Controls</div>
-                <div style="font-size: 22px; font-weight: 800; color: #ffffff; margin-top: 2px;">52 Rule Checks</div>
-                <div style="font-size: 11px; color: #86efac;">${reconciledTotals}/6 Ledger Totals Reconciled</div>
+
+              <div class="landing-pillar-card">
+                <span class="landing-pillar-num">02 &mdash; Civitas Care</span>
+                <h3 class="landing-pillar-title">Preventive Maintenance</h3>
+                <p class="landing-pillar-desc">
+                  Scheduled maintenance programs for generators, HVAC, water systems, and residential estates.
+                </p>
               </div>
-              <div style="background: rgba(0,0,0,0.22); padding: 14px 18px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
-                <div style="font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 700;">Approval Threshold</div>
-                <div style="font-size: 22px; font-weight: 800; color: #ffffff; margin-top: 2px;">&gt; ${currency}${state.settings.spendingApprovalThreshold}</div>
-                <div style="font-size: 11px; color: #cbd5e1;">Mandatory CEO Sign-Off</div>
-              </div>
-              <div style="background: rgba(0,0,0,0.22); padding: 14px 18px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
-                <div style="font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 700;">Service Catalogue</div>
-                <div style="font-size: 22px; font-weight: 800; color: #ffffff; margin-top: 2px;">S01 – S16</div>
-                <div style="font-size: 11px; color: #cbd5e1;">Standardized Accra &amp; Tema Rates</div>
+
+              <div class="landing-pillar-card">
+                <span class="landing-pillar-num">03 &mdash; Property Watch</span>
+                <h3 class="landing-pillar-title">Diaspora Stewardship</h3>
+                <p class="landing-pillar-desc">
+                  Independent 6-point condition walkthroughs with verified photo evidence for remote property owners.
+                </p>
               </div>
             </div>
           </div>
-        </section>
+        </main>
 
-        <!-- Operational Divisions & Governance Architecture -->
-        <section style="padding: 48px 24px; flex: 1;">
-          <div class="landing-container">
-            <div style="text-align: center; max-width: 720px; margin: 0 auto 36px auto;">
-              <h2 style="font-size: 24px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">
-                Three Operational Divisions &bull; One Unified Control System
-              </h2>
-              <p style="font-size: 14px; color: #64748b; margin: 0;">
-                Aligned with <strong>www.civitasestate.com</strong> to serve residential homeowners, commercial facilities, and diaspora property investors across East Legon, Cantonments, Airport, Spintex, Adenta, and Tema Communities 1–25.
-              </p>
+        <!-- Quiet Architectural Footer -->
+        <footer class="landing-footer">
+          <div class="landing-container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: #10b981; font-size: 10px;">●</span>
+              <span><strong>v2.1 Governance Engine</strong> &bull; ${reconciledTotals}/6 Control Ledgers Reconciled</span>
             </div>
-
-            <div class="landing-grid-3" style="margin-bottom: 44px;">
-              <div class="landing-feature-card">
-                <span class="ops-badge badge-ok" style="margin-bottom: 10px;">Division 01</span>
-                <h3 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Civitas Fix (Repairs &amp; Cleaning)</h3>
-                <p style="font-size: 13px; color: #475569; margin: 0 0 14px 0;">
-                  On-demand residential and commercial cleaning, deep post-construction cleanups, plumbing, electrical, AC servicing, lock hardware, painting, and tiling with benchmarked pricing.
-                </p>
-                <div style="font-size: 11px; font-weight: 700; color: #075545;">
-                  ✓ Vetted Artisans &bull; ✓ Single-Entry Field Labour &bull; ✓ Quality Inspection Gate
-                </div>
-              </div>
-
-              <div class="landing-feature-card" style="border-top-color: var(--brand-terracotta);">
-                <span class="ops-badge badge-pending" style="margin-bottom: 10px;">Division 02</span>
-                <h3 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Civitas Care (Preventive Plans)</h3>
-                <p style="font-size: 13px; color: #475569; margin: 0 0 14px 0;">
-                  Scheduled preventive maintenance routines for generators, HVAC/AC units, water pumps, and electrical distribution boards to preserve long-term estate asset value.
-                </p>
-                <div style="font-size: 11px; font-weight: 700; color: #075545;">
-                  ✓ Recurring Schedules &bull; ✓ 35% Minimum Margin Guardrail &bull; ✓ SLA Tracking
-                </div>
-              </div>
-
-              <div class="landing-feature-card" style="border-top-color: #1d4ed8;">
-                <span class="ops-badge badge-reconciled" style="margin-bottom: 10px;">Division 03</span>
-                <h3 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Civitas Property Watch (Diaspora)</h3>
-                <p style="font-size: 13px; color: #475569; margin: 0 0 14px 0;">
-                  Independent periodic walkthroughs for remote landlords and diaspora owners. Grades roof, plumbing, electrical, damp, and perimeter with cloud photo evidence and WhatsApp/PDF dispatch.
-                </p>
-                <div style="font-size: 11px; font-weight: 700; color: #075545;">
-                  ✓ 6-Point Condition Grading &bull; ✓ Cloud Photo Links &bull; ✓ Instant WhatsApp Summaries
-                </div>
-              </div>
+            <div>
+              &copy; ${state.settings.reportingYear} ${state.settings.companyName} &bull; ${state.settings.phone}
             </div>
-
-            <!-- Governance & Internal Control Pillars -->
-            <div class="ops-card" style="background: #ffffff; border: 1px solid #cbd5e1; padding: 28px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; border-bottom: 1px solid #e2e8f0; padding-bottom: 16px;">
-                <div>
-                  <h3 style="font-size: 17px; font-weight: 800; color: #075545; margin: 0; text-transform: uppercase;">
-                    Governance, Risk &amp; Accounting Control Framework
-                  </h3>
-                  <p style="font-size: 12px; color: #64748b; margin: 4px 0 0 0;">
-                    Enforcing strict financial integrity, role separation, and tamper-evident period locks.
-                  </p>
-                </div>
-                <button id="btnCardToLogin" class="btn-brand-primary" style="padding: 10px 20px; font-size: 13px;">
-                  Sign In to Governance Dashboard &rarr;
-                </button>
-              </div>
-
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; font-size: 12px;">
-                <div>
-                  <strong style="color: #075545; display: block; margin-bottom: 4px;">1. Role-Based Access (RBAC)</strong>
-                  5 distinct operational roles (Founder/CEO, Operations Coordinator, Finance Officer, Field Supervisor, Internal Auditor) with full audit logging.
-                </div>
-                <div>
-                  <strong style="color: #075545; display: block; margin-bottom: 4px;">2. Revenue &ne; Cash Invariant</strong>
-                  Accrual revenue is recognized from valid Tax Invoices; cash is tracked strictly from reconciled Mobile Money &amp; Bank receipts.
-                </div>
-                <div>
-                  <strong style="color: #075545; display: block; margin-bottom: 4px;">3. NEIP Grant Ring-Fencing</strong>
-                  Dedicated tracking for GH₵80,000 NEIP categories (A–H), holding Working Capital Reserve (GH₵22,000) strictly as cash.
-                </div>
-                <div>
-                  <strong style="color: #075545; display: block; margin-bottom: 4px;">4. Tamper-Evident Period Close</strong>
-                  Locked monthly accounts snapshot invoice, payment, expense, and assignment counts—flagging any subsequent alteration.
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Footer -->
-        <footer style="background: #043D33; color: rgba(255,255,255,0.7); padding: 18px 24px; font-size: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
-          <div class="landing-container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <span>&copy; ${state.settings.reportingYear} ${state.settings.companyName}. All Rights Reserved.</span>
-            <span>Contact: ${state.settings.email} &bull; WhatsApp: ${state.settings.phone}</span>
           </div>
         </footer>
       </div>
@@ -565,9 +499,7 @@ class OpsApp {
           <div class="login-card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
               <div style="display: flex; align-items: center; gap: 10px;">
-                <div style="width: 34px; height: 34px; border-radius: 8px; background: var(--brand-green); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 16px; color: #ffffff;">
-                  C
-                </div>
+                <img src="/assets/logos/Civitas_Symbol_256.png" alt="Civitas" style="width: 34px; height: 34px; object-fit: contain;" />
                 <div>
                   <div style="font-size: 15px; font-weight: 800; color: #075545;">Civitas Governance Portal v2.1</div>
                   <div style="font-size: 11px; color: #64748b;">Authenticated Staff &amp; Executive Sign-In</div>
