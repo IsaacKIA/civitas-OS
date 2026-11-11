@@ -103,86 +103,113 @@ class OpsApp {
     const totalPendingApprovals = pendingExpenses + pendingQuotes;
     const isReadOnlyAuditor = currentUser.role === 'Board / Internal Auditor';
 
+    const allowedTabs = this.getAllowedTabsForRole(currentUser.role);
+    if (!allowedTabs.includes(this.currentTab)) {
+      this.currentTab = allowedTabs[0] || 'operations';
+    }
+    const canSeeTab = (tab: ActiveTab) => allowedTabs.includes(tab);
+
     this.mountEl.innerHTML = `
       <div class="dashboard-shell">
-        <!-- Left Sidebar Navigation -->
+        <!-- Left Sidebar Navigation (Role-Filtered) -->
         <aside class="dashboard-sidebar">
           <div class="sidebar-brand">
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
-              <div style="width: 34px; height: 34px; border-radius: 8px; background: var(--brand-terracotta); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 16px; color: #ffffff;">
-                C
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="width: 34px; height: 34px; border-radius: 8px; background: #ffffff; padding: 3px; display: flex; align-items: center; justify-content: center;">
+                <img src="/assets/logos/Civitas_Symbol_256.png" alt="Civitas" style="width: 100%; height: 100%; object-fit: contain;" />
               </div>
               <div>
                 <h1 style="font-size: 15px; font-weight: 800; margin: 0; color: #ffffff; letter-spacing: -0.2px; line-height: 1.2;">
                   Civitas Estate
                 </h1>
                 <p style="font-size: 10px; color: #fed7aa; font-weight: 700; margin: 0; text-transform: uppercase; letter-spacing: 0.5px;">
-                  Operations &amp; Control
+                  Accra &amp; Tema
                 </p>
               </div>
-            </div>
-            <div style="font-size: 11px; color: rgba(255,255,255,0.65); margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
-              Year: <strong style="color: #fff;">${settings.reportingYear}</strong> &bull; Ref: <strong style="color: #fff;">${settings.reportDateOverride || 'Today'}</strong>
             </div>
           </div>
 
           <div style="flex: 1; overflow-y: auto; padding-bottom: 16px;">
-            <div class="sidebar-group-label">Executive &amp; Governance</div>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'dashboard' ? 'active' : ''}" data-tab="dashboard">
-              <span>Command Centre</span>
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'users' ? 'active' : ''}" data-tab="users">
-              <span>Users &amp; Governance</span>
-              ${totalPendingApprovals > 0 ? `<span class="ops-badge badge-attention" style="font-size: 10px; padding: 2px 6px;">${totalPendingApprovals} Pending</span>` : `<span class="ops-badge badge-ok" style="font-size: 9px; padding: 2px 6px;">RBAC</span>`}
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'checks' ? 'active' : ''}" data-tab="checks">
-              <span>52 Control Checks</span>
-              <span class="ops-badge ${evaluation.itemsNeedingAttention > 0 ? 'badge-attention' : 'badge-ok'}" style="font-size: 10px; padding: 2px 6px;">
-                ${evaluation.itemsNeedingAttention > 0 ? `${evaluation.itemsNeedingAttention} Attn` : 'OK'}
-              </span>
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'governance' ? 'active' : ''}" data-tab="governance">
-              <span>Risk &amp; Compliance</span>
-            </button>
+            ${(canSeeTab('dashboard') || canSeeTab('users') || canSeeTab('governance')) ? `
+              <div class="sidebar-group-label">Overview &amp; Governance</div>
+            ` : ''}
+            ${canSeeTab('dashboard') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'dashboard' ? 'active' : ''}" data-tab="dashboard">
+                <span>Executive Overview</span>
+              </button>
+            ` : ''}
+            ${canSeeTab('users') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'users' ? 'active' : ''}" data-tab="users">
+                <span>Team &amp; Approvals</span>
+                ${totalPendingApprovals > 0 ? `<span class="ops-badge badge-attention" style="font-size: 10px; padding: 2px 6px;">${totalPendingApprovals}</span>` : ''}
+              </button>
+            ` : ''}
+            ${canSeeTab('governance') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'governance' ? 'active' : ''}" data-tab="governance">
+                <span>Risk &amp; Compliance</span>
+              </button>
+            ` : ''}
 
-            <div class="sidebar-group-label">Commercial &amp; Field Ops</div>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'sales' ? 'active' : ''}" data-tab="sales">
-              <span>Sales &amp; Customers</span>
-              <span style="font-size: 11px; opacity: 0.65;">${state.customers.length}</span>
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'operations' ? 'active' : ''}" data-tab="operations">
-              <span>Service Operations</span>
-              <span style="font-size: 11px; opacity: 0.65;">${state.jobs.length}</span>
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'contractors' ? 'active' : ''}" data-tab="contractors">
-              <span>Field Workforce</span>
-              <span style="font-size: 11px; opacity: 0.65;">${state.contractors.length}</span>
-            </button>
+            ${(canSeeTab('sales') || canSeeTab('operations') || canSeeTab('contractors')) ? `
+              <div class="sidebar-group-label">Operations</div>
+            ` : ''}
+            ${canSeeTab('sales') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'sales' ? 'active' : ''}" data-tab="sales">
+                <span>Clients &amp; Quotes</span>
+                <span style="font-size: 11px; opacity: 0.65;">${state.customers.length}</span>
+              </button>
+            ` : ''}
+            ${canSeeTab('operations') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'operations' ? 'active' : ''}" data-tab="operations">
+                <span>Jobs &amp; Inspections</span>
+                <span style="font-size: 11px; opacity: 0.65;">${state.jobs.length}</span>
+              </button>
+            ` : ''}
+            ${canSeeTab('contractors') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'contractors' ? 'active' : ''}" data-tab="contractors">
+                <span>Field Workforce</span>
+                <span style="font-size: 11px; opacity: 0.65;">${state.contractors.length}</span>
+              </button>
+            ` : ''}
 
-            <div class="sidebar-group-label">Finance &amp; Accountability</div>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'financial' ? 'active' : ''}" data-tab="financial">
-              <span>Financial Performance</span>
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'receivables' ? 'active' : ''}" data-tab="receivables">
-              <span>Invoices &amp; Receivables</span>
-              <span style="font-size: 11px; opacity: 0.65;">${state.invoices.length}</span>
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'expenses' ? 'active' : ''}" data-tab="expenses">
-              <span>Expenses &amp; Procurement</span>
-              <span style="font-size: 11px; opacity: 0.65;">${state.expenses.length}</span>
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'grant' ? 'active' : ''}" data-tab="grant">
-              <span>Grant &amp; NEIP Funding</span>
-            </button>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'assets' ? 'active' : ''}" data-tab="assets">
-              <span>Equipment &amp; Assets</span>
-              <span style="font-size: 11px; opacity: 0.65;">${state.assets.length}</span>
-            </button>
+            ${(canSeeTab('financial') || canSeeTab('receivables') || canSeeTab('expenses') || canSeeTab('grant') || canSeeTab('assets')) ? `
+              <div class="sidebar-group-label">Finance</div>
+            ` : ''}
+            ${canSeeTab('financial') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'financial' ? 'active' : ''}" data-tab="financial">
+                <span>Financial Reports</span>
+              </button>
+            ` : ''}
+            ${canSeeTab('receivables') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'receivables' ? 'active' : ''}" data-tab="receivables">
+                <span>Invoices &amp; Receipts</span>
+                <span style="font-size: 11px; opacity: 0.65;">${state.invoices.length}</span>
+              </button>
+            ` : ''}
+            ${canSeeTab('expenses') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'expenses' ? 'active' : ''}" data-tab="expenses">
+                <span>Expenses</span>
+                <span style="font-size: 11px; opacity: 0.65;">${state.expenses.length}</span>
+              </button>
+            ` : ''}
+            ${canSeeTab('assets') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'assets' ? 'active' : ''}" data-tab="assets">
+                <span>Equipment &amp; Assets</span>
+                <span style="font-size: 11px; opacity: 0.65;">${state.assets.length}</span>
+              </button>
+            ` : ''}
+            ${canSeeTab('grant') ? `
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'grant' ? 'active' : ''}" data-tab="grant">
+                <span>Grant &amp; Funding</span>
+              </button>
+            ` : ''}
 
-            <div class="sidebar-group-label">Official Documentation</div>
-            <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'print' ? 'active' : ''}" data-tab="print">
-              <span>Printable Documents</span>
-            </button>
+            ${canSeeTab('print') ? `
+              <div class="sidebar-group-label">Documents</div>
+              <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'print' ? 'active' : ''}" data-tab="print">
+                <span>Print &amp; PDF Suite</span>
+              </button>
+            ` : ''}
           </div>
 
           <!-- Sidebar Footer -->
@@ -191,7 +218,7 @@ class OpsApp {
             <div style="color: #fed7aa; font-weight: 600; font-size: 10px; margin-bottom: 10px;">${currentUser.role}</div>
             <div style="display: flex; gap: 6px;">
               <button id="btnGoLanding" class="btn-brand-outline" style="flex: 1; justify-content: center; color: #e2e8f0; border-color: rgba(255,255,255,0.25); padding: 5px 8px; font-size: 10px;">
-                Landing
+                Home
               </button>
               <button id="btnLogout" class="btn-brand-outline" style="flex: 1; justify-content: center; color: #fca5a5; border-color: rgba(252,165,165,0.35); padding: 5px 8px; font-size: 10px;">
                 Sign Out
@@ -202,78 +229,47 @@ class OpsApp {
 
         <!-- Main Workspace -->
         <div class="dashboard-main">
-          <!-- Sticky Governance Topbar -->
+          <!-- Clean Executive Topbar -->
           <header class="dashboard-topbar">
-            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-              <div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 15px; font-weight: 800; color: #075545;">
-                    ${this.getTabTitle(this.currentTab)}
-                  </span>
-                  <span class="ops-badge ${currentUser.role === 'Founder / CEO' ? 'badge-ok' : currentUser.role === 'Board / Internal Auditor' ? 'badge-reconciled' : 'badge-pending'}">
-                    ${currentUser.role}
-                  </span>
-                </div>
-                <p style="font-size: 11px; color: #64748b; margin: 0;">
-                  Active Operator: <strong>${currentUser.fullName}</strong> (${currentUser.department}) &bull; Audit Trail: <strong>Recording</strong>
-                </p>
-              </div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span style="font-size: 16px; font-weight: 800; color: #043D33;">
+                ${this.getTabTitle(this.currentTab)}
+              </span>
+              <span class="ops-badge ${currentUser.role === 'Founder / CEO' ? 'badge-ok' : currentUser.role === 'Board / Internal Auditor' ? 'badge-reconciled' : 'badge-pending'}">
+                ${currentUser.role}
+              </span>
             </div>
 
-            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-              <span class="ops-badge ${opsStore.isDemoMode() ? 'badge-pending' : 'badge-ok'}" style="padding: 5px 10px; font-size: 11px;">
-                ${opsStore.isDemoMode() ? '🧪 Isolated Demo Sandbox' : '🔒 Production Mode (RBAC Enforced)'}
-              </span>
-
-              <button id="btnToggleSandboxMode" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px;">
-                ${opsStore.isDemoMode() ? 'Switch to Production' : 'Enter Demo Sandbox'}
-              </button>
-
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               ${opsStore.isDemoMode() ? `
-                <div style="display: flex; align-items: center; gap: 6px; background: #fffbeb; border: 1px solid #fde68a; padding: 4px 8px; border-radius: 6px;">
-                  <span style="font-size: 10px; font-weight: 700; color: #92400e; text-transform: uppercase;">Sandbox Role:</span>
-                  <select id="selectQuickSwitchUser" style="border: none; background: transparent; font-size: 11px; font-weight: 700; color: #075545; cursor: pointer; outline: none;">
-                    ${users.filter(u => u.status === 'Active').map(u => `
-                      <option value="${u.userId}" ${u.userId === currentUser.userId ? 'selected' : ''}>
-                        ${u.fullName} — ${u.role}
-                      </option>
-                    `).join('')}
-                  </select>
+                <div style="display: flex; align-items: center; gap: 6px; background: #fffbeb; border: 1px solid #fde68a; padding: 4px 10px; border-radius: 999px;">
+                  <span style="font-size: 10px; font-weight: 700; color: #92400e;">Demo Mode</span>
+                  ${users.filter(u => u.status === 'Active').length > 1 ? `
+                    <select id="selectQuickSwitchUser" style="border: none; background: transparent; font-size: 11px; font-weight: 700; color: #075545; cursor: pointer; outline: none;">
+                      ${users.filter(u => u.status === 'Active').map(u => `
+                        <option value="${u.userId}" ${u.userId === currentUser.userId ? 'selected' : ''}>
+                          ${u.fullName} (${u.role})
+                        </option>
+                      `).join('')}
+                    </select>
+                  ` : ''}
+                  <button id="btnToggleSandboxMode" style="border: none; background: #fef3c7; color: #92400e; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; cursor: pointer;">
+                    Exit Demo
+                  </button>
                 </div>
               ` : ''}
 
               ${opsStore.canCurrentUser('MANAGE_USERS') ? `
-                <button id="btnTopbarAddUser" class="btn-brand-primary" style="font-size: 11px; padding: 6px 12px;">
+                <button id="btnTopbarAddUser" class="btn-brand-primary" style="font-size: 12px; padding: 7px 14px; border-radius: 999px;">
                   + Add Staff User
                 </button>
               ` : ''}
-
-              ${opsStore.canCurrentUser('IMPORT_RESET_DATABASE') ? `
-                <button id="btnPreloadDemo" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px;">
-                  Preload Demo
-                </button>
-                <button id="btnResetClean" class="btn-brand-outline" style="color: #b91c1c; border-color: #fecaca; font-size: 11px; padding: 6px 10px;">
-                  Reset Clean
-                </button>
-              ` : ''}
-              <button id="btnExportJson" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px;">
-                Backup JSON
-              </button>
-              ${opsStore.canCurrentUser('IMPORT_RESET_DATABASE') ? `
-                <button id="btnImportJson" class="btn-brand-outline" style="color: #1d4ed8; border-color: #bfdbfe; font-size: 11px; padding: 6px 10px;">
-                  Restore JSON
-                </button>
-              ` : ''}
-              <input type="file" id="inputImportJson" accept=".json" style="display: none;" />
-              <a href="https://www.civitasestate.com" target="_blank" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px; text-decoration: none;">
-                civitasestate.com &nearr;
-              </a>
             </div>
           </header>
 
           ${isReadOnlyAuditor ? `
             <div style="background: #eef2ff; border-bottom: 1px solid #c7d2fe; padding: 8px 24px; font-size: 12px; color: #3730a3; display: flex; justify-content: space-between; align-items: center;">
-              <span><strong>🔒 Read-Only Governance &amp; Internal Audit Mode:</strong> You are signed in as <strong>${currentUser.fullName} (${currentUser.role})</strong>. Data modification controls are restricted to preserve audit independence.</span>
+              <span><strong>Read-Only Audit View:</strong> Signed in as <strong>${currentUser.fullName}</strong>.</span>
               <span class="ops-badge badge-reconciled">Audit Oversight</span>
             </div>
           ` : ''}
@@ -287,6 +283,23 @@ class OpsApp {
     `;
 
     this.bindEvents();
+  }
+
+  private getAllowedTabsForRole(role: string): ActiveTab[] {
+    switch (role) {
+      case 'Founder / CEO':
+        return ['dashboard', 'users', 'sales', 'operations', 'contractors', 'financial', 'receivables', 'expenses', 'assets', 'grant', 'governance', 'print'];
+      case 'Operations Coordinator':
+        return ['dashboard', 'sales', 'operations', 'contractors', 'print'];
+      case 'Finance & Accounts Officer':
+        return ['dashboard', 'financial', 'receivables', 'expenses', 'assets', 'grant', 'print'];
+      case 'Field Supervisor':
+        return ['operations', 'contractors', 'print'];
+      case 'Board / Internal Auditor':
+        return ['dashboard', 'financial', 'receivables', 'expenses', 'grant', 'governance', 'users', 'print'];
+      default:
+        return ['operations', 'print'];
+    }
   }
 
   private getTabTitle(tab: ActiveTab): string {
@@ -346,54 +359,47 @@ class OpsApp {
   }
 
   // ==========================================
-  // STAGE 1: ICONIC MINIMALIST LANDING PAGE
+  // STAGE 1: WORLD-CLASS ICONIC MINIMALIST LANDING PAGE
   // ==========================================
   private renderLandingScreen(
     state: OpsDatabaseState,
     _mgmt: ReturnType<typeof opsStore.getManagementAccounts>,
-    evaluation: ReturnType<typeof opsStore.getChecksEvaluation>,
+    _evaluation: ReturnType<typeof opsStore.getChecksEvaluation>,
     _currency: string
   ): string {
     const activeUser = opsStore.getCurrentUser();
-    const reconciledTotals = evaluation.controlTotals.filter(t => t.status === 'RECONCILED').length;
 
     return `
       <div class="landing-shell">
-        <!-- Minimalist Top Navigation -->
+        <!-- Floating Glass Navigation Dock -->
         <header class="landing-nav">
-          <div class="landing-container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <img src="/assets/logos/Civitas_Symbol_256.png" alt="Civitas Symbol" style="width: 34px; height: 34px; object-fit: contain;" />
-              <div>
-                <div style="font-family: var(--font-serif); font-size: 19px; font-weight: 700; color: #043D33; letter-spacing: -0.01em; line-height: 1.1;">
-                  ${state.settings.companyName}
-                </div>
-                <div style="font-size: 11px; color: #64748b; font-weight: 500; letter-spacing: 0.3px;">
-                  Accra &amp; Tema, Ghana
-                </div>
-              </div>
+          <div class="landing-dock">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <img src="/assets/logos/Civitas_Symbol_256.png" alt="Civitas" style="width: 28px; height: 28px; object-fit: contain;" />
+              <span style="font-family: var(--font-serif); font-size: 18px; font-weight: 700; color: #043D33; letter-spacing: -0.01em;">
+                Civitas Estate
+              </span>
             </div>
 
-            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-              <a href="https://www.civitasestate.com" target="_blank" rel="noopener" style="color: #475569; font-size: 12px; font-weight: 600; text-decoration: none; padding: 6px 10px;">
-                civitasestate.com &nearr;
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <a href="https://www.civitasestate.com" target="_blank" rel="noopener" style="color: #64748b; font-size: 12px; font-weight: 600; text-decoration: none; padding: 6px 12px;">
+                Accra &middot; Tema &nearr;
               </a>
               ${activeUser ? `
-                <button id="btnLandingResumeDashboard" class="btn-iconic-secondary" style="padding: 9px 18px; font-size: 12px;">
-                  Resume as ${activeUser.fullName} &rarr;
+                <button id="btnLandingResumeDashboard" class="btn-iconic-secondary" style="padding: 8px 18px; font-size: 12px;">
+                  Dashboard &rarr;
                 </button>
               ` : ''}
               <button id="btnLandingToLogin" class="btn-iconic-primary" style="padding: 9px 22px; font-size: 12px; box-shadow: none;">
-                Sign In &rarr;
+                Sign In
               </button>
             </div>
           </div>
         </header>
 
-        <!-- Iconic Centerpiece Hero -->
+        <!-- Iconic Minimalist Centerpiece -->
         <main class="landing-centerpiece">
           <div class="landing-container">
-            <!-- Authentic Civitas Emblem on Porcelain Medallion -->
             <div class="landing-emblem-frame">
               <img
                 src="/assets/logos/Civitas_Official_Logo_Transparent.png"
@@ -402,189 +408,102 @@ class OpsApp {
               />
             </div>
 
-            <div>
-              <span class="landing-overline">Smart Living &bull; Sustainable Legacy</span>
-            </div>
-
             <h1 class="landing-headline">
-              The Standard of <em>Property Care</em> &amp; Estate Stewardship.
+              Smart Living.<br /><em>Sustainable Legacy.</em>
             </h1>
 
             <p class="landing-subheadline">
-              Executive operations, vetted artisan dispatch, diaspora property watch, and institutional financial governance for Greater Accra &amp; Tema.
+              Property Care &amp; Estate Stewardship
             </p>
 
-            <!-- Primary & Secondary Entry Actions -->
             <div class="landing-cta-group">
               <button id="btnHeroLogin" class="btn-iconic-primary">
-                Enter Executive Portal &rarr;
+                Enter Portal &rarr;
               </button>
               <button id="btnHeroDemoLogin" class="btn-iconic-secondary">
-                Explore Interactive Sandbox
+                Interactive Demo
               </button>
             </div>
 
-            <!-- Three Iconic Service Pillars -->
-            <div class="landing-pillars">
-              <div class="landing-pillar-card">
-                <span class="landing-pillar-num">01 &mdash; Civitas Fix</span>
-                <h3 class="landing-pillar-title">Repairs &amp; Deep Cleaning</h3>
-                <p class="landing-pillar-desc">
-                  On-demand electrical, plumbing, AC servicing, painting, and post-construction cleaning by vetted specialists.
-                </p>
-              </div>
-
-              <div class="landing-pillar-card">
-                <span class="landing-pillar-num">02 &mdash; Civitas Care</span>
-                <h3 class="landing-pillar-title">Preventive Maintenance</h3>
-                <p class="landing-pillar-desc">
-                  Scheduled maintenance programs for generators, HVAC, water systems, and residential estates.
-                </p>
-              </div>
-
-              <div class="landing-pillar-card">
-                <span class="landing-pillar-num">03 &mdash; Property Watch</span>
-                <h3 class="landing-pillar-title">Diaspora Stewardship</h3>
-                <p class="landing-pillar-desc">
-                  Independent 6-point condition walkthroughs with verified photo evidence for remote property owners.
-                </p>
+            <!-- Whisper-Quiet 3-Pillar Glass Strip -->
+            <div>
+              <div class="landing-pill-strip">
+                <div class="landing-division-chip">
+                  <span class="chip-num">01</span> Civitas Fix
+                </div>
+                <span style="color: rgba(4, 61, 51, 0.15);">&bull;</span>
+                <div class="landing-division-chip">
+                  <span class="chip-num">02</span> Civitas Care
+                </div>
+                <span style="color: rgba(4, 61, 51, 0.15);">&bull;</span>
+                <div class="landing-division-chip">
+                  <span class="chip-num">03</span> Property Watch
+                </div>
               </div>
             </div>
           </div>
         </main>
 
-        <!-- Quiet Architectural Footer -->
+        <!-- Minimal Footer -->
         <footer class="landing-footer">
-          <div class="landing-container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="color: #10b981; font-size: 10px;">●</span>
-              <span><strong>v2.1 Governance Engine</strong> &bull; ${reconciledTotals}/6 Control Ledgers Reconciled</span>
-            </div>
-            <div>
-              &copy; ${state.settings.reportingYear} ${state.settings.companyName} &bull; ${state.settings.phone}
-            </div>
-          </div>
+          &copy; ${state.settings.reportingYear} ${state.settings.companyName} &middot; Greater Accra &amp; Tema, Ghana
         </footer>
       </div>
     `;
   }
 
   // ==========================================
-  // STAGE 2: STAFF AUTHENTICATION & LOGIN PORTAL
+  // STAGE 2: CLEAN SINGLE-CARD LOGIN PORTAL
   // ==========================================
-  private renderLoginScreen(state: OpsDatabaseState): string {
-    const users = opsStore.getUsers();
-
-    const quickRoleCardsHtml = users.map(u => `
-      <div class="role-switch-card">
-        <div>
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px;">
-            <strong style="font-size: 14px; color: #ffffff;">${u.fullName}</strong>
-            <span class="ops-badge ${u.role === 'Founder / CEO' ? 'badge-ok' : u.role === 'Board / Internal Auditor' ? 'badge-reconciled' : 'badge-pending'}" style="font-size: 10px;">
-              ${u.role}
-            </span>
-            ${u.status !== 'Active' ? `<span class="ops-badge badge-attention" style="font-size: 10px;">Suspended</span>` : ''}
-          </div>
-          <div style="font-size: 11px; color: #cbd5e1;">
-            ${u.email} (${u.userId}) &bull; <span style="color: #86efac;">🔒 Salted SHA-256 Auth</span>
-          </div>
-          <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
-            ${u.notes || u.department}
-          </div>
-        </div>
-        <button class="btn-brand-outline btn-select-login-user" data-email="${u.email}" ${u.status !== 'Active' ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : 'style="white-space: nowrap; font-size: 11px; padding: 8px 14px; color: #fff; border-color: rgba(255,255,255,0.35);"'}>
-          Select Account &rarr;
-        </button>
-      </div>
-    `).join('');
-
+  private renderLoginScreen(_state: OpsDatabaseState): string {
     return `
       <div class="login-shell">
-        <div class="login-grid">
-          <!-- Left: Credentials Login Card -->
-          <div class="login-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-              <div style="display: flex; align-items: center; gap: 10px;">
-                <img src="/assets/logos/Civitas_Symbol_256.png" alt="Civitas" style="width: 34px; height: 34px; object-fit: contain;" />
-                <div>
-                  <div style="font-size: 15px; font-weight: 800; color: #075545;">Civitas Governance Portal v2.1</div>
-                  <div style="font-size: 11px; color: #64748b;">Authenticated Staff &amp; Executive Sign-In</div>
-                </div>
-              </div>
-              <button id="btnLoginBackToLanding" class="btn-brand-outline" style="font-size: 11px; padding: 5px 10px;">
-                &larr; Landing Page
-              </button>
+        <div class="login-card-centered">
+          <div style="text-align: center; margin-bottom: 28px;">
+            <div style="display: inline-flex; padding: 14px 24px; background: #FAF8F5; border: 1px solid rgba(4, 61, 51, 0.08); border-radius: 18px; margin-bottom: 18px;">
+              <img src="/assets/logos/Civitas_Official_Logo_Transparent.png" alt="Civitas Estate" style="height: 48px; width: auto; object-fit: contain;" />
             </div>
-
-            <h2 style="font-size: 22px; font-weight: 800; color: #1e293b; margin: 0 0 6px 0;">
-              Sign In to Operations Dashboard
+            <h2 style="font-family: var(--font-serif); font-size: 28px; font-weight: 700; color: #043D33; margin: 0 0 4px 0; letter-spacing: -0.02em;">
+              Welcome Back
             </h2>
-            <p style="font-size: 12px; color: #64748b; margin: 0 0 20px 0;">
-              Individual authentication required. Sessions expire after 30 minutes of inactivity and lock after 5 failed attempts.
+            <p style="font-size: 13px; color: #64748b; margin: 0;">
+              Sign in to Civitas Operations Portal
             </p>
-
-            ${this.loginError ? `
-              <div style="background: #fee2e2; border: 1px solid #fecaca; color: #b91c1c; padding: 10px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; margin-bottom: 16px;">
-                ⚠️ ${this.loginError}
-              </div>
-            ` : ''}
-
-            <form id="formStaffLogin">
-              <div style="margin-bottom: 16px;">
-                <label style="display: block; font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px;">
-                  Staff Email or User ID *
-                </label>
-                <input type="text" id="loginEmailInput" required value="admin@civitasestate.com" placeholder="e.g. admin@civitasestate.com or U0001" style="width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; box-sizing: border-box;">
-              </div>
-
-              <div style="margin-bottom: 20px;">
-                <label style="display: block; font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px;">
-                  Personal Security Passcode / PIN *
-                </label>
-                <input type="password" id="loginPinInput" required placeholder="Enter your personal security passcode" autocomplete="current-password" style="width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; box-sizing: border-box;">
-              </div>
-
-              <button type="submit" class="btn-brand-primary" style="width: 100%; justify-content: center; padding: 12px; font-size: 14px;">
-                Authenticate &amp; Open Dashboard &rarr;
-              </button>
-            </form>
-
-            <div style="margin-top: 16px; padding-top: 14px; border-top: 1px dashed #cbd5e1; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
-              <div style="font-size: 11px; color: #475569;">
-                <strong>Evaluation / Training:</strong> Launch isolated Demo Sandbox (separate from production records).
-              </div>
-              <button type="button" id="btnLaunchIsolatedDemo" class="btn-brand-outline" style="white-space: nowrap; font-size: 11px; padding: 6px 12px;">
-                🧪 Enter Demo Sandbox
-              </button>
-            </div>
-
-            <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #64748b;">
-              <span>Brute-Force Lockout: <strong>5 Attempts</strong></span>
-              <span>Hash Chain Audit Trail: <strong>Active</strong></span>
-            </div>
           </div>
 
-          <!-- Right: Registered Governance Directory -->
-          <div style="display: flex; flex-direction: column; justify-content: space-between;">
-            <div>
-              <div class="landing-pill" style="margin-bottom: 10px;">
-                Role-Based Access Control (RBAC)
-              </div>
-              <h3 style="font-size: 20px; font-weight: 800; color: #ffffff; margin: 0 0 6px 0;">
-                Registered Staff &amp; Governance Accounts
-              </h3>
-              <p style="font-size: 12px; color: #cbd5e1; margin: 0 0 16px 0;">
-                Select your account below and enter your personal security passcode on the left. Credentials are salted and hashed (never displayed in plaintext):
-              </p>
+          ${this.loginError ? `
+            <div style="background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; padding: 10px 14px; border-radius: 10px; font-size: 12px; font-weight: 600; margin-bottom: 18px; text-align: center;">
+              ${this.loginError}
+            </div>
+          ` : ''}
 
-              <div style="display: flex; flex-direction: column; gap: 10px;">
-                ${quickRoleCardsHtml}
-              </div>
+          <form id="formStaffLogin">
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px;">
+                Email or User ID
+              </label>
+              <input type="text" id="loginEmailInput" required value="admin@civitasestate.com" placeholder="name@civitasestate.com" style="width: 100%; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; box-sizing: border-box; outline: none;">
             </div>
 
-            <div style="margin-top: 18px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 12px 16px; color: #e2e8f0; font-size: 11px;">
-              <strong style="color: #fed7aa;">Founder-Managed Access Control:</strong> Only the <strong>Founder / CEO (Isaac Agya Koomson)</strong> is registered initially. Sign in as Founder to add and manage staff accounts (Operations, Finance, Field Supervisor, Auditor) directly from the dashboard.
+            <div style="margin-bottom: 24px;">
+              <label style="display: block; font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px;">
+                Passcode
+              </label>
+              <input type="password" id="loginPinInput" required placeholder="••••••••" autocomplete="current-password" style="width: 100%; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; box-sizing: border-box; outline: none;">
             </div>
+
+            <button type="submit" class="btn-iconic-primary" style="width: 100%; justify-content: center; padding: 14px; font-size: 14px;">
+              Sign In &rarr;
+            </button>
+          </form>
+
+          <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
+            <button type="button" id="btnLoginBackToLanding" style="background: none; border: none; color: #64748b; font-size: 12px; font-weight: 600; cursor: pointer; padding: 0;">
+              &larr; Back to Home
+            </button>
+            <button type="button" id="btnLaunchIsolatedDemo" style="background: none; border: none; color: #075545; font-size: 12px; font-weight: 700; cursor: pointer; padding: 0;">
+              Explore Demo &rarr;
+            </button>
           </div>
         </div>
       </div>
@@ -683,7 +602,6 @@ class OpsApp {
         <td>${u.department}</td>
         <td>${u.email}</td>
         <td>${u.phone}</td>
-        <td style="font-family: monospace; font-size: 11px; color: #15803d;">🔒 Salted Hash</td>
         <td style="font-size: 11px; color: #64748b;">${u.lastLogin || 'Never'}</td>
         <td>
           <span class="ops-badge ${u.status === 'Active' ? 'badge-ok' : 'badge-attention'}">${u.status}</span>
@@ -691,7 +609,7 @@ class OpsApp {
         <td style="white-space: nowrap;">
           ${opsStore.isDemoMode() && u.status === 'Active' && currentUser?.userId !== u.userId ? `
             <button class="btn-brand-outline btn-switch-to-user" data-id="${u.userId}" style="padding: 3px 8px; font-size: 11px;">
-              Sandbox Switch
+              Switch
             </button>
           ` : ''}
           ${isCEO && u.userId !== 'U0001' ? `
@@ -754,10 +672,10 @@ class OpsApp {
     `).join('');
 
     const auditIntegrity = opsStore.verifyAuditTrailIntegrity();
-    const auditRowsHtml = (state.auditLogs || []).slice(0, 50).map(log => `
+    const auditRowsHtml = (state.auditLogs || []).slice(0, 30).map(log => `
       <tr>
         <td style="font-family: monospace; font-size: 11px; color: #64748b;">${log.timestamp.replace('T', ' ').substring(0, 19)}</td>
-        <td style="font-weight: 700; color: #075545;">${log.actor} <span style="font-size:10px; color:#64748b;">(${log.userId || 'SYS'})</span></td>
+        <td style="font-weight: 700; color: #075545;">${log.actor}</td>
         <td>
           <span class="ops-badge ${log.action === 'APPROVE' || log.action === 'CREATE' ? 'badge-ok' : log.action === 'REJECT' || log.action === 'DELETE' || log.action === 'SECURITY_ALERT' || log.action === 'LOGIN_FAILED' ? 'badge-attention' : log.action === 'CLOSE_PERIOD' ? 'badge-reconciled' : 'badge-pending'}">
             ${log.action}
@@ -767,7 +685,6 @@ class OpsApp {
         <td style="font-family: monospace;">${log.entityId}</td>
         <td style="font-size: 12px; color: #334155;">
           ${log.details || '-'}
-          ${log.entryHash ? `<span style="font-family:monospace; font-size:10px; color:#94a3b8; margin-left:6px;">[${log.entryHash.slice(0, 14)}]</span>` : ''}
         </td>
       </tr>
     `).join('');
@@ -859,7 +776,6 @@ class OpsApp {
               <th>Department</th>
               <th>Email</th>
               <th>Phone</th>
-              <th>PIN</th>
               <th>Last Login</th>
               <th>Status</th>
               <th>Actions</th>
@@ -993,27 +909,54 @@ class OpsApp {
         </table>
       </div>
 
-      <!-- 5. Immutable System Audit Trail -->
+      <!-- 5. System Activity Log -->
       <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0 0 12px 0;">
-        5. Immutable System Audit Log Register (Latest 30 Events)
+        5. Recent System Activity Log
       </h2>
-      <div class="ops-table-container">
+      <div class="ops-table-container" style="margin-bottom: 32px;">
         <table class="ops-table">
           <thead>
             <tr>
-              <th>Timestamp (UTC)</th>
-              <th>Authenticated Actor &amp; Role</th>
+              <th>Timestamp</th>
+              <th>Operator</th>
               <th>Action</th>
-              <th>Entity</th>
-              <th>Record ID</th>
-              <th>Audit Details</th>
+              <th>Module</th>
+              <th>Reference</th>
+              <th>Summary</th>
             </tr>
           </thead>
           <tbody>
-            ${auditRowsHtml || '<tr><td colspan="6" style="text-align: center; color: #64748b;">No audit events recorded yet.</td></tr>'}
+            ${auditRowsHtml || '<tr><td colspan="6" style="text-align: center; color: #64748b;">No activity recorded yet.</td></tr>'}
           </tbody>
         </table>
       </div>
+
+      ${isCEO ? `
+        <!-- 6. Founder System Data & Backup Utilities (Tucked out of main topbar) -->
+        <div class="ops-card" style="background: #f8fafc; border: 1px solid #e2e8f0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <h3 style="font-size: 14px; font-weight: 800; color: #043D33; margin: 0 0 2px 0;">System Data &amp; Backup Utilities</h3>
+              <p style="font-size: 11px; color: #64748b; margin: 0;">Automatic backend persistence is active. Use these utilities for manual export, restore, or sandbox testing.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <button id="btnExportJson" class="btn-brand-outline" style="font-size: 11px; padding: 6px 12px;">
+                Export Backup JSON
+              </button>
+              <button id="btnImportJson" class="btn-brand-outline" style="color: #1d4ed8; border-color: #bfdbfe; font-size: 11px; padding: 6px 12px;">
+                Restore Backup JSON
+              </button>
+              <input type="file" id="inputImportJson" accept=".json" style="display: none;" />
+              <button id="btnPreloadDemo" class="btn-brand-outline" style="font-size: 11px; padding: 6px 12px;">
+                Load Sample Data
+              </button>
+              <button id="btnResetClean" class="btn-brand-outline" style="color: #b91c1c; border-color: #fecaca; font-size: 11px; padding: 6px 12px;">
+                Reset Database
+              </button>
+            </div>
+          </div>
+        </div>
+      ` : ''}
     `;
   }
 
