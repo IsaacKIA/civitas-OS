@@ -242,6 +242,12 @@ class OpsApp {
                 </div>
               ` : ''}
 
+              ${opsStore.canCurrentUser('MANAGE_USERS') ? `
+                <button id="btnTopbarAddUser" class="btn-brand-primary" style="font-size: 11px; padding: 6px 12px;">
+                  + Add Staff User
+                </button>
+              ` : ''}
+
               ${opsStore.canCurrentUser('IMPORT_RESET_DATABASE') ? `
                 <button id="btnPreloadDemo" class="btn-brand-outline" style="font-size: 11px; padding: 6px 10px;">
                   Preload Demo
@@ -577,7 +583,7 @@ class OpsApp {
             </div>
 
             <div style="margin-top: 18px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 12px 16px; color: #e2e8f0; font-size: 11px;">
-              <strong style="color: #fed7aa;">Governance Control Note:</strong> Only the <strong>Founder / CEO</strong> can approve expenses above GH₵${state.settings.spendingApprovalThreshold}, lock or reopen monthly accounting periods, or manage staff accounts.
+              <strong style="color: #fed7aa;">Founder-Managed Access Control:</strong> Only the <strong>Founder / CEO (Isaac Agya Koomson)</strong> is registered initially. Sign in as Founder to add and manage staff accounts (Operations, Finance, Field Supervisor, Auditor) directly from the dashboard.
             </div>
           </div>
         </div>
@@ -689,10 +695,16 @@ class OpsApp {
             </button>
           ` : ''}
           ${isCEO && u.userId !== 'U0001' ? `
-            <button class="btn-brand-outline btn-toggle-user-status" data-id="${u.userId}" data-status="${u.status}" style="padding: 3px 8px; font-size: 11px; color: ${u.status === 'Active' ? '#b91c1c' : '#15803d'}; margin-left: 4px;">
+            <button class="btn-brand-outline btn-toggle-user-status" data-id="${u.userId}" data-status="${u.status}" style="padding: 3px 8px; font-size: 11px; color: ${u.status === 'Active' ? '#b45309' : '#15803d'}; margin-left: 4px;">
               ${u.status === 'Active' ? 'Suspend' : 'Activate'}
             </button>
-          ` : ''}
+            <button class="btn-brand-outline btn-reset-user-pin" data-id="${u.userId}" data-name="${u.fullName}" style="padding: 3px 8px; font-size: 11px; color: #1d4ed8; margin-left: 4px;">
+              Reset PIN
+            </button>
+            <button class="btn-brand-outline btn-delete-user" data-id="${u.userId}" data-name="${u.fullName}" style="padding: 3px 8px; font-size: 11px; color: #b91c1c; border-color: #fecaca; margin-left: 4px;">
+              Delete
+            </button>
+          ` : `<span style="font-size: 11px; color: #075545; font-weight: 700;">Primary Founder</span>`}
         </td>
       </tr>
     `).join('');
@@ -2456,6 +2468,7 @@ class OpsApp {
     document.getElementById('btnNewAssignment')?.addEventListener('click', () => this.showNewAssignmentModal());
     document.getElementById('btnNewInspection')?.addEventListener('click', () => this.showNewInspectionModal());
     document.getElementById('btnNewUser')?.addEventListener('click', () => this.showNewUserModal());
+    document.getElementById('btnTopbarAddUser')?.addEventListener('click', () => this.showNewUserModal());
 
     // Dashboard session & governance controls
     document.getElementById('btnGoLanding')?.addEventListener('click', () => {
@@ -2515,6 +2528,39 @@ class OpsApp {
           opsStore.updateUser(userId, { status: nextStatus as any });
         } catch (err: any) {
           alert(err?.message || 'Failed to update user status.');
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-reset-user-pin').forEach((el) => {
+      const btn = el as HTMLElement;
+      btn.addEventListener('click', () => {
+        const userId = btn.dataset.id;
+        const userName = btn.dataset.name || userId;
+        if (!userId) return;
+        const newPin = prompt(`Enter a new security PIN/passcode for ${userName} (${userId}):`);
+        if (!newPin || !newPin.trim()) return;
+        try {
+          opsStore.updateUser(userId, { pinCode: newPin.trim(), failedLoginAttempts: 0, lockedUntil: undefined });
+          alert(`Security passcode updated for ${userName}.`);
+        } catch (err: any) {
+          alert(err?.message || 'Failed to reset passcode.');
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-delete-user').forEach((el) => {
+      const btn = el as HTMLElement;
+      btn.addEventListener('click', () => {
+        const userId = btn.dataset.id;
+        const userName = btn.dataset.name || userId;
+        if (!userId) return;
+        if (confirm(`Delete staff user account "${userName}" (${userId})? This action will be recorded in the audit log.`)) {
+          try {
+            opsStore.deleteUser(userId);
+          } catch (err: any) {
+            alert(err?.message || 'Failed to delete user.');
+          }
         }
       });
     });
@@ -3685,25 +3731,25 @@ An official PDF condition report is available upon request. Thank you for choosi
     const modalHtml = `
       <div class="ops-modal-backdrop" id="opsModal">
         <div class="ops-modal-content">
-          <h3 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Add System User (${nextId})</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">Provision a staff or governance account with Role-Based Access Control (RBAC) and PIN authentication.</p>
+          <h3 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0 0 8px 0;">Add Staff / Governance User (${nextId})</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">Provision a new user account with Role-Based Access Control (RBAC) and a personal security passcode.</p>
           <form id="formNewUser">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
               <div>
                 <label style="font-size: 12px; font-weight: 700; color: #475569;">Full Name *</label>
-                <input type="text" id="usrName" required placeholder="e.g. Efua Mensah" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
+                <input type="text" id="usrName" required placeholder="e.g. Ama Osei" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
               </div>
               <div>
                 <label style="font-size: 12px; font-weight: 700; color: #475569;">Email Address *</label>
-                <input type="email" id="usrEmail" required placeholder="efua@civitasestate.com" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
+                <input type="email" id="usrEmail" required placeholder="e.g. operations@civitasestate.com" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
               </div>
               <div>
-                <label style="font-size: 12px; font-weight: 700; color: #475569;">Phone Number (Ghana)</label>
-                <input type="text" id="usrPhone" value="0501234567" required style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
+                <label style="font-size: 12px; font-weight: 700; color: #475569;">Phone Number (Ghana) *</label>
+                <input type="text" id="usrPhone" required placeholder="e.g. +233 55 506 2589" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
               </div>
               <div>
-                <label style="font-size: 12px; font-weight: 700; color: #475569;">4-Digit Security PIN *</label>
-                <input type="text" id="usrPin" value="5555" maxlength="6" required style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; font-family: monospace;">
+                <label style="font-size: 12px; font-weight: 700; color: #475569;">Security Passcode / PIN *</label>
+                <input type="text" id="usrPin" required placeholder="e.g. 1111" maxlength="12" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; font-family: monospace;">
               </div>
               <div>
                 <label style="font-size: 12px; font-weight: 700; color: #475569;">Governance Role *</label>
@@ -3726,6 +3772,10 @@ An official PDF condition report is available upon request. Thank you for choosi
                 </select>
               </div>
             </div>
+            <div style="margin-bottom: 16px;">
+              <label style="font-size: 12px; font-weight: 700; color: #475569;">Role Responsibilities / Notes</label>
+              <input type="text" id="usrNotes" placeholder="e.g. Manages customer onboarding, quotations, and artisan dispatch" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
+            </div>
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
               <button type="button" id="btnModalCancel" class="btn-brand-outline">Cancel</button>
               <button type="submit" class="btn-brand-primary">Create User Account</button>
@@ -3738,18 +3788,25 @@ An official PDF condition report is available upon request. Thank you for choosi
     this.showModal(modalHtml, () => {
       document.getElementById('formNewUser')?.addEventListener('submit', (ev) => {
         ev.preventDefault();
-        opsStore.addUser({
-          userId: nextId,
-          fullName: (document.getElementById('usrName') as HTMLInputElement).value.trim(),
-          email: (document.getElementById('usrEmail') as HTMLInputElement).value.trim(),
-          phone: (document.getElementById('usrPhone') as HTMLInputElement).value.trim(),
-          pinCode: (document.getElementById('usrPin') as HTMLInputElement).value.trim() || '1234',
-          role: (document.getElementById('usrRole') as HTMLSelectElement).value as any,
-          department: (document.getElementById('usrDept') as HTMLSelectElement).value as any,
-          status: 'Active',
-          createdDate: formatYMD(new Date())
-        });
-        this.closeModal();
+        try {
+          opsStore.addUser({
+            userId: nextId,
+            fullName: (document.getElementById('usrName') as HTMLInputElement).value.trim(),
+            email: (document.getElementById('usrEmail') as HTMLInputElement).value.trim(),
+            phone: (document.getElementById('usrPhone') as HTMLInputElement).value.trim(),
+            pinCode: (document.getElementById('usrPin') as HTMLInputElement).value.trim() || '1234',
+            role: (document.getElementById('usrRole') as HTMLSelectElement).value as any,
+            department: (document.getElementById('usrDept') as HTMLSelectElement).value as any,
+            notes: (document.getElementById('usrNotes') as HTMLInputElement).value.trim(),
+            status: 'Active',
+            createdDate: formatYMD(new Date())
+          });
+          this.closeModal();
+          this.currentTab = 'users';
+          this.render();
+        } catch (err: any) {
+          alert(err?.message || 'Failed to create user account.');
+        }
       });
     });
   }

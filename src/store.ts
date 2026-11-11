@@ -155,8 +155,9 @@ export interface OpsDatabaseState {
   auditLogs: AuditLogEntry[];
 }
 
-const STORAGE_KEY_PROD = 'civitas_ops_store_v2_prod';
-const STORAGE_KEY_DEMO = 'civitas_ops_demo_sandbox_v2_1';
+const STORAGE_KEY_PROD = 'civitas_ops_store_v2_2_prod';
+const STORAGE_KEY_LEGACY_PROD = 'civitas_ops_store_v2_prod';
+const STORAGE_KEY_DEMO = 'civitas_ops_demo_sandbox_v2_2';
 const SESSION_USER_KEY = 'civitas_ops_active_user_v2_1';
 const SESSION_EXPIRY_KEY = 'civitas_ops_session_expiry_v2_1';
 const SESSION_DURATION_MS = 30 * 60 * 1000; // 30 minutes session timeout
@@ -287,6 +288,19 @@ export class OpsStore {
             ),
             settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) }
           };
+        }
+        // Migrate operational records from legacy storage while resetting pre-seeded staff users to Founder-only
+        const legacySaved = window.localStorage.getItem(STORAGE_KEY_LEGACY_PROD);
+        if (legacySaved) {
+          const parsed = JSON.parse(legacySaved);
+          const migrated: OpsDatabaseState = {
+            ...this.getEmptyState(),
+            ...parsed,
+            users: sanitizeUsersCredentials([...DEFAULT_USERS]),
+            settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) }
+          };
+          window.localStorage.setItem(STORAGE_KEY_PROD, JSON.stringify(migrated));
+          return migrated;
         }
       } catch (e) {
         console.warn('Failed to parse saved ops store:', e);
@@ -1769,6 +1783,25 @@ export class OpsStore {
       this.logAction('UPDATE', 'SystemUser', userId, actor, `Updated user status/profile`);
       this.saveToStorage();
     }
+  }
+
+  public deleteUser(userId: string, actor = 'Founder/CEO'): void {
+    this.enforcePermission('MANAGE_USERS');
+    if (userId === 'U0001') {
+      throw new Error('Primary Founder / CEO account (U0001) cannot be deleted.');
+    }
+    const users = this.getUsers();
+    const idx = users.findIndex(u => u.userId === userId);
+    if (idx < 0) {
+      throw new Error(`User ${userId} not found.`);
+    }
+    const removed = users[idx];
+    users.splice(idx, 1);
+    if (this.currentUser && this.currentUser.userId === userId) {
+      this.logout('User account deleted by Founder/CEO');
+    }
+    this.logAction('DELETE', 'SystemUser', userId, this.getActorLabel(actor), `Deleted user account ${removed.fullName} (${removed.role})`);
+    this.saveToStorage();
   }
 
   public approveExpense(expenseId: string, overrideReason?: string): void {

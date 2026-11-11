@@ -128,57 +128,5 @@ export const DEFAULT_USERS: SystemUser[] = [
     createdDate: '2026-01-01',
     lastLogin: '2026-11-07 08:30',
     notes: 'Executive sign-off authority (> GH₵500), Period Close lock, NEIP Grant custodian & User Governance.'
-  },
-  {
-    userId: 'U0002',
-    fullName: 'Ama Osei',
-    email: 'operations@civitasestate.com',
-    phone: '+233 55 506 2589',
-    role: 'Operations Coordinator',
-    department: 'Service Operations',
-    passwordHash: hashCredential('U0002', '1111'),
-    status: 'Active',
-    createdDate: '2026-01-15',
-    lastLogin: '2026-11-07 09:15',
-    notes: 'Manages customer onboarding, quotations, job scheduling, and artisan dispatch across Accra & Tema.'
-  },
-  {
-    userId: 'U0003',
-    fullName: 'Kofi Boateng',
-    email: 'finance@civitasestate.com',
-    phone: '+233 24 812 3901',
-    role: 'Finance & Accounts Officer',
-    department: 'Finance & Control',
-    passwordHash: hashCredential('U0003', '2222'),
-    status: 'Active',
-    createdDate: '2026-02-01',
-    lastLogin: '2026-11-06 17:40',
-    notes: 'Manages invoicing, MoMo/Bank receipt reconciliation, expense recording, and asset register.'
-  },
-  {
-    userId: 'U0004',
-    fullName: 'Yaw Asante',
-    email: 'field@civitasestate.com',
-    phone: '+233 27 409 8812',
-    role: 'Field Supervisor',
-    department: 'Field Operations',
-    passwordHash: hashCredential('U0004', '3333'),
-    status: 'Active',
-    createdDate: '2026-02-10',
-    lastLogin: '2026-11-07 07:50',
-    notes: 'Leads on-site quality inspections, contractor attendance, and Civitas Property Watch walkthroughs.'
-  },
-  {
-    userId: 'U0005',
-    fullName: 'Abena Danquah',
-    email: 'audit@civitasestate.com',
-    phone: '+233 50 611 4400',
-    role: 'Board / Internal Auditor',
-    department: 'Board & Audit',
-    passwordHash: hashCredential('U0005', '4444'),
-    status: 'Active',
-    createdDate: '2026-03-01',
-    lastLogin: '2026-11-05 14:20',
-    notes: 'Independent read-only oversight of 52 control checks, NEIP grant accountability, and audit logs.'
   }
 ];

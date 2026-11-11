@@ -105,12 +105,14 @@ describe('Civitas Operations & Financial Control System — Version 2.1 Suite', 
   // ==========================================
   // 2. SECURITY & AUTHENTICATION TESTS (PHASE 2)
   // ==========================================
-  it('Security 1: Credentials are salted and hashed (never stored in plaintext) and impersonation is blocked', () => {
+  it('Security 1: Only Founder exists initially; Founder can add & delete users; credentials are salted and hashed', () => {
     const store = new OpsStore();
     store.loadState(createDemoState());
 
     const users = store.getUsers();
-    assert.strictEqual(users.length, 5);
+    assert.strictEqual(users.length, 1, 'Only the Founder / CEO (U0001) should exist initially');
+    assert.strictEqual(users[0].userId, 'U0001');
+    assert.strictEqual(users[0].role, 'Founder / CEO');
     users.forEach(u => {
       assert.strictEqual(u.pinCode, undefined, `User ${u.userId} must not retain plaintext pinCode`);
       assert.ok(u.passwordHash?.startsWith('cv21$'), `User ${u.userId} must store salted passwordHash`);
@@ -122,11 +124,56 @@ describe('Civitas Operations & Financial Control System — Version 2.1 Suite', 
       /Security Policy Violation: Unrestricted account switching is disabled in production/,
       'Passwordless loginAsUser must be blocked in production'
     );
+
+    // Sign in as Founder and add a staff user from the dashboard store
+    store.authenticateUser('admin@civitasestate.com', '2026');
+    store.addUser({
+      userId: 'U0002',
+      fullName: 'Ama Osei',
+      email: 'operations@civitasestate.com',
+      phone: '+233 55 506 2589',
+      role: 'Operations Coordinator',
+      department: 'Service Operations',
+      pinCode: '1111',
+      status: 'Active',
+      createdDate: '2026-01-15'
+    });
+    assert.strictEqual(store.getUsers().length, 2);
+
+    // Primary Founder (U0001) cannot be deleted, but U0002 can be deleted by Founder
+    assert.throws(() => store.deleteUser('U0001'), /Primary Founder \/ CEO account \(U0001\) cannot be deleted/);
+    store.deleteUser('U0002');
+    assert.strictEqual(store.getUsers().length, 1);
   });
 
   it('Security 2: Brute-force protection locks account after 5 failed login attempts and blocks suspended users', () => {
     const store = new OpsStore();
     store.loadState(createDemoState());
+
+    // Founder logs in and provisions U0002 (Operations) and U0004 (Field Supervisor)
+    store.authenticateUser('admin@civitasestate.com', '2026');
+    store.addUser({
+      userId: 'U0002',
+      fullName: 'Ama Osei',
+      email: 'operations@civitasestate.com',
+      phone: '+233 55 506 2589',
+      role: 'Operations Coordinator',
+      department: 'Service Operations',
+      pinCode: '1111',
+      status: 'Active',
+      createdDate: '2026-01-15'
+    });
+    store.addUser({
+      userId: 'U0004',
+      fullName: 'Yaw Asante',
+      email: 'field@civitasestate.com',
+      phone: '+233 27 409 8812',
+      role: 'Field Supervisor',
+      department: 'Field Operations',
+      pinCode: '3333',
+      status: 'Active',
+      createdDate: '2026-02-10'
+    });
 
     // 5 failed attempts on U0002 (Ama Osei)
     for (let i = 1; i <= 4; i++) {
@@ -155,6 +202,31 @@ describe('Civitas Operations & Financial Control System — Version 2.1 Suite', 
   it('Security 3: Role-Based Access Control (RBAC) and session expiration are strictly enforced at the store layer', () => {
     const store = new OpsStore();
     store.loadState(createDemoState());
+
+    // Founder provisions Internal Auditor (U0005) and Finance Officer (U0003)
+    store.authenticateUser('admin@civitasestate.com', '2026');
+    store.addUser({
+      userId: 'U0005',
+      fullName: 'Abena Danquah',
+      email: 'audit@civitasestate.com',
+      phone: '+233 50 611 4400',
+      role: 'Board / Internal Auditor',
+      department: 'Board & Audit',
+      pinCode: '4444',
+      status: 'Active',
+      createdDate: '2026-03-01'
+    });
+    store.addUser({
+      userId: 'U0003',
+      fullName: 'Kofi Boateng',
+      email: 'finance@civitasestate.com',
+      phone: '+233 24 812 3901',
+      role: 'Finance & Accounts Officer',
+      department: 'Finance & Control',
+      pinCode: '2222',
+      status: 'Active',
+      createdDate: '2026-02-01'
+    });
 
     // Sign in as Read-Only Internal Auditor (U0005, PIN 4444)
     const auditorAuth = store.authenticateUser('audit@civitasestate.com', '4444');
@@ -207,6 +279,20 @@ describe('Civitas Operations & Financial Control System — Version 2.1 Suite', 
   it('Financial 1: Expense approval workflow, non-CEO self-approval prevention, and CEO sign-off', () => {
     const store = new OpsStore();
     store.loadState(createDemoState());
+
+    // Founder provisions Finance Officer (U0003, PIN 2222)
+    store.authenticateUser('admin@civitasestate.com', '2026');
+    store.addUser({
+      userId: 'U0003',
+      fullName: 'Kofi Boateng',
+      email: 'finance@civitasestate.com',
+      phone: '+233 24 812 3901',
+      role: 'Finance & Accounts Officer',
+      department: 'Finance & Control',
+      pinCode: '2222',
+      status: 'Active',
+      createdDate: '2026-02-01'
+    });
 
     // Authenticate as Finance Officer (Kofi Boateng, U0003, PIN 2222)
     const finAuth = store.authenticateUser('finance@civitasestate.com', '2222');
@@ -293,7 +379,7 @@ describe('Civitas Operations & Financial Control System — Version 2.1 Suite', 
   it('Financial 3: Partial invoice payments, outstanding balance accuracy, and duplicate payment prevention', () => {
     const store = new OpsStore();
     store.loadState(createDemoState());
-    store.authenticateUser('finance@civitasestate.com', '2222');
+    store.authenticateUser('admin@civitasestate.com', '2026');
 
     store.addInvoice({
       invoiceNo: 'INV0500',
