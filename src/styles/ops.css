@@ -1,0 +1,470 @@
+/* ==========================================================================
+   CIVITAS ESTATE & MAINTENANCE - OPERATIONS PLATFORM STYLES
+   Smart Living. Sustainable Legacy.
+   ========================================================================== */
+
+:root {
+  --brand-green: #075545;
+  --brand-forest: #043D33;
+  --brand-terracotta: #E4693F;
+  --brand-ivory: #FAF8F4;
+  --brand-charcoal: #24312D;
+  --surface-card: #ffffff;
+  --border-subtle: #e2e8f0;
+  --text-muted: #64748b;
+  --font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Cormorant Garamond', Georgia, serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--brand-ivory);
+  color: var(--brand-charcoal);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+.ops-header {
+  background: var(--brand-forest);
+  color: #ffffff;
+  padding: 16px 24px;
+  border-bottom: 2px solid var(--brand-terracotta);
+}
+
+.ops-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+/* Navigation Tabs */
+.ops-nav-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 12px 24px 0 24px;
+  background: var(--brand-forest);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  scrollbar-width: thin;
+}
+
+.ops-nav-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.75);
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.ops-nav-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.ops-nav-btn.active {
+  color: #ffffff;
+  border-bottom-color: var(--brand-terracotta);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Badges */
+.ops-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-ok { background: #dcfce7; color: #15803d; }
+.badge-attention { background: #fee2e2; color: #b91c1c; }
+.badge-reconciled { background: #e0e7ff; color: #4338ca; }
+.badge-pending { background: #fef9c3; color: #854d0e; }
+
+/* Cards & Layout */
+.ops-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.ops-card {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.ops-table-container {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow-x: auto;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.ops-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+
+.ops-table th {
+  background: #f8fafc;
+  padding: 10px 14px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.ops-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  color: var(--brand-charcoal);
+  white-space: nowrap;
+}
+
+.ops-table tr:hover {
+  background-color: #fafaf9;
+}
+
+/* Buttons */
+.btn-brand-primary {
+  background: var(--brand-green);
+  color: #ffffff;
+  border: none;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  transition: background 0.2s ease;
+}
+
+.btn-brand-primary:hover {
+  background: var(--brand-forest);
+}
+
+.btn-brand-terracotta {
+  background: var(--brand-terracotta);
+  color: #ffffff;
+  border: none;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.2s ease;
+}
+
+.btn-brand-terracotta:hover {
+  opacity: 0.9;
+}
+
+.btn-brand-outline {
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-brand-outline:hover {
+  background: #f1f5f9;
+}
+
+/* Modals */
+.ops-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.ops-modal-content {
+  background: #ffffff;
+  border-radius: 8px;
+  max-width: 840px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+/* Print Rules */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printArea, #printArea * {
+    visibility: visible;
+  }
+  #printArea {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
+   STAGE 1: EXECUTIVE LANDING PAGE
+   ========================================================================== */
+.landing-shell {
+  min-height: 100vh;
+  background: var(--brand-ivory);
+  display: flex;
+  flex-direction: column;
+}
+
+.landing-hero {
+  background: linear-gradient(135deg, #043D33 0%, #075545 65%, #0a6b56 100%);
+  color: #ffffff;
+  padding: 56px 24px 64px 24px;
+  border-bottom: 4px solid var(--brand-terracotta);
+  position: relative;
+}
+
+.landing-container {
+  max-width: 1240px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.landing-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(228, 105, 63, 0.2);
+  border: 1px solid rgba(228, 105, 63, 0.55);
+  color: #fed7aa;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  margin-bottom: 18px;
+}
+
+.landing-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.landing-feature-card {
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-top: 4px solid var(--brand-green);
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.landing-feature-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(4, 61, 51, 0.08);
+}
+
+/* ==========================================================================
+   STAGE 2: AUTHENTICATION & GOVERNANCE LOGIN PORTAL
+   ========================================================================== */
+.login-shell {
+  min-height: 100vh;
+  background: linear-gradient(150deg, #043D33 0%, #075545 55%, #134e4a 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 32px 20px;
+}
+
+.login-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 28px;
+  align-items: stretch;
+}
+
+@media (max-width: 900px) {
+  .login-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.login-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
+}
+
+.role-switch-card {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  padding: 14px 16px;
+  color: #ffffff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.18s ease;
+}
+
+.role-switch-card:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: var(--brand-terracotta);
+}
+
+/* ==========================================================================
+   STAGE 3: EXECUTIVE SIDEBAR + TOPBAR DASHBOARD
+   ========================================================================== */
+.dashboard-shell {
+  min-height: 100vh;
+  display: flex;
+  background: var(--brand-ivory);
+}
+
+.dashboard-sidebar {
+  width: 265px;
+  background: var(--brand-forest);
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 980px) {
+  .dashboard-shell {
+    flex-direction: column;
+  }
+  .dashboard-sidebar {
+    width: 100%;
+  }
+}
+
+.sidebar-brand {
+  padding: 20px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.sidebar-group-label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 16px 18px 6px 18px;
+}
+
+.sidebar-nav-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  color: rgba(255, 255, 255, 0.78);
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.sidebar-nav-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.sidebar-nav-item.active {
+  background: rgba(228, 105, 63, 0.16);
+  border-left-color: var(--brand-terracotta);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.dashboard-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dashboard-topbar {
+  background: #ffffff;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 12px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.dashboard-content {
+  padding: 24px;
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+}

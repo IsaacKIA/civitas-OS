@@ -1,0 +1,3 @@
+/* Civitas brand colours, sampled approximately from supplied raster logo. */
+:root { --civitas-emerald:#075545; --civitas-terracotta:#E4693F; --civitas-white:#FFFFFF; --civitas-forest:#043D33; --civitas-ivory:#FAF8F4; --civitas-text:#24312D; }
+.civitas-logo {display:block;max-width:100%;height:auto;object-fit:contain;}
