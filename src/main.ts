@@ -54,6 +54,7 @@ class OpsApp {
   private selectedCustomerForQuote?: string;
   private selectedPrintDocKeys: Set<string> = new Set();
   private printDocFilter: 'all' | 'quote' | 'invoice' | 'receipt' | 'inspection' = 'all';
+  private tableSearchQuery: string = '';
 
   constructor(mountId: string) {
     const el = document.getElementById(mountId);
@@ -64,6 +65,35 @@ class OpsApp {
     opsStore.subscribe(() => {
       this.render();
     });
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', (ev) => {
+        if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
+          const searchEl = document.getElementById('inputGlobalTableSearch') as HTMLInputElement | null;
+          if (searchEl) {
+            ev.preventDefault();
+            searchEl.focus();
+            searchEl.select();
+          }
+        } else if (ev.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'SELECT') {
+          const searchEl = document.getElementById('inputGlobalTableSearch') as HTMLInputElement | null;
+          if (searchEl) {
+            ev.preventDefault();
+            searchEl.focus();
+          }
+        } else if (ev.key === 'Escape') {
+          const modal = document.getElementById('opsModal');
+          if (modal) {
+            this.closeModal();
+          } else if (this.tableSearchQuery) {
+            this.tableSearchQuery = '';
+            const searchEl = document.getElementById('inputGlobalTableSearch') as HTMLInputElement | null;
+            if (searchEl) searchEl.value = '';
+            this.applyLiveTableFilter('');
+          }
+        }
+      });
+    }
 
     this.render();
   }
@@ -243,6 +273,18 @@ class OpsApp {
               </span>
             </div>
 
+            <div class="ops-search-shell">
+              <span class="ops-search-icon">🔍</span>
+              <input
+                type="search"
+                id="inputGlobalTableSearch"
+                class="ops-search-input"
+                placeholder="Filter records in this view..."
+                value="${this.escapeHtml(this.tableSearchQuery)}"
+              />
+              <span id="badgeSearchMatchCount" class="ops-search-kbd">Ctrl+K</span>
+            </div>
+
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               ${opsStore.isDemoMode() ? `
                 <div style="display: flex; align-items: center; gap: 6px; background: #fffbeb; border: 1px solid #fde68a; padding: 4px 10px; border-radius: 999px;">
@@ -292,6 +334,9 @@ class OpsApp {
     `;
 
     this.bindEvents();
+    if (this.tableSearchQuery) {
+      this.applyLiveTableFilter(this.tableSearchQuery);
+    }
   }
 
   private getAllowedTabsForRole(role: string): ActiveTab[] {
@@ -1018,11 +1063,43 @@ class OpsApp {
       </tr>
     `).join('');
 
+    const collectionPct = totalRev > 0 ? Math.min(100, Math.round((cashRec / totalRev) * 100)) : 0;
+    const grossMarginPct = mgmt.yearTotal.contributionMargin ? Math.round(mgmt.yearTotal.contributionMargin * 100) : 0;
+    const fixRev = roundMoney(state.invoices.filter(i => i.cancelled !== 'Yes' && i.division === 'Civitas Fix').reduce((s, i) => s + (i.netRevenue || i.amountBeforeTax || 0), 0));
+    const careRev = roundMoney(state.invoices.filter(i => i.cancelled !== 'Yes' && i.division === 'Civitas Care').reduce((s, i) => s + (i.netRevenue || i.amountBeforeTax || 0), 0));
+    const watchRev = roundMoney(state.invoices.filter(i => i.cancelled !== 'Yes' && i.division === 'Civitas Property Watch').reduce((s, i) => s + (i.netRevenue || i.amountBeforeTax || 0), 0));
+    const divTotal = Math.max(1, fixRev + careRev + watchRev);
+    const fixPct = Math.round((fixRev / divTotal) * 100);
+    const carePct = Math.round((careRev / divTotal) * 100);
+    const watchPct = Math.max(0, 100 - fixPct - carePct);
+
     return `
+      <!-- Quick Interactive Action Bar -->
+      <div class="ops-card" style="padding: 14px 18px; margin-bottom: 20px; background: linear-gradient(135deg, #043D33 0%, #075545 100%); color: #ffffff; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #fed7aa; font-weight: 800;">Interactive Executive Workspace</div>
+          <div style="font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.92);">Click any KPI card below to drill directly into its ledger, or launch a workflow action:</div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button type="button" id="btnDashQuickUpload" class="btn-brand-terracotta" style="border-radius: 999px; padding: 8px 16px;">
+            📤 Smart Upload Document
+          </button>
+          <button type="button" class="btn-brand-outline" data-goto-tab="print" style="border-radius: 999px; background: rgba(255,255,255,0.12); color: #ffffff; border-color: rgba(255,255,255,0.28);">
+            🖨️ Print &amp; PDF Suite
+          </button>
+          <button type="button" class="btn-brand-outline" data-goto-tab="financial" style="border-radius: 999px; background: rgba(255,255,255,0.12); color: #ffffff; border-color: rgba(255,255,255,0.28);">
+            📊 12-Month P&amp;L
+          </button>
+        </div>
+      </div>
+
       <!-- 3 Core Management Pulse Questions Banner (Phase 7) -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 24px;">
-        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 5px solid #075545; border-radius: 8px; padding: 14px 16px;">
-          <div style="font-size: 11px; font-weight: 800; color: #075545; text-transform: uppercase;">Q1: Are We Getting Customers?</div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 20px;">
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="sales" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 5px solid #075545; padding: 14px 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 11px; font-weight: 800; color: #075545; text-transform: uppercase;">Q1: Are We Getting Customers?</div>
+            <span class="kpi-drill-hint">Open Sales &rarr;</span>
+          </div>
           <div style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 4px 0;">
             ${enqCount} Enquiries &bull; ${quoteConversionRate}% Quote Conversion
           </div>
@@ -1030,17 +1107,23 @@ class OpsApp {
             Active Quotes: <strong>${currency}${openQuoteVal.toFixed(2)}</strong> &bull; Recurring / Portfolio Clients: <strong>${recurringClients}</strong>
           </div>
         </div>
-        <div style="background: #fff7ed; border: 1px solid #fed7aa; border-left: 5px solid #FF5800; border-radius: 8px; padding: 14px 16px;">
-          <div style="font-size: 11px; font-weight: 800; color: #9a3412; text-transform: uppercase;">Q2: Are We Completing Profitable Jobs?</div>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="operations" style="background: #fff7ed; border: 1px solid #fed7aa; border-left: 5px solid #FF5800; padding: 14px 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 11px; font-weight: 800; color: #9a3412; text-transform: uppercase;">Q2: Are We Completing Profitable Jobs?</div>
+            <span class="kpi-drill-hint">Open Jobs &rarr;</span>
+          </div>
           <div style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 4px 0;">
-            ${jobsCompleted}/${jobsBooked} Completed &bull; ${mgmt.yearTotal.contributionMargin ? Math.round(mgmt.yearTotal.contributionMargin * 100) : 0}% Gross Margin
+            ${jobsCompleted}/${jobsBooked} Completed &bull; ${grossMarginPct}% Gross Margin
           </div>
           <div style="font-size: 11px; color: #475569;">
             In Progress: <strong>${jobsInProgress}</strong> &bull; Gross Profit: <strong>${currency}${grossContr.toFixed(2)}</strong> (Target &ge; 35%)
           </div>
         </div>
-        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-left: 5px solid #1d4ed8; border-radius: 8px; padding: 14px 16px;">
-          <div style="font-size: 11px; font-weight: 800; color: #1e40af; text-transform: uppercase;">Q3: Are We Collecting Enough Cash to Operate?</div>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="receivables" style="background: #eff6ff; border: 1px solid #bfdbfe; border-left: 5px solid #1d4ed8; padding: 14px 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 11px; font-weight: 800; color: #1e40af; text-transform: uppercase;">Q3: Are We Collecting Enough Cash to Operate?</div>
+            <span class="kpi-drill-hint">Open Cash &rarr;</span>
+          </div>
           <div style="font-size: 18px; font-weight: 800; color: #1e293b; margin: 4px 0;">
             ${currency}${cashRec.toFixed(2)} Collected &bull; ${currency}${cashBal.toFixed(2)} Cash
           </div>
@@ -1050,31 +1133,77 @@ class OpsApp {
         </div>
       </div>
 
+      <!-- Interactive Visual Telemetry Strip -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 24px;">
+        <div class="ops-card" style="padding: 16px 18px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #075545;">Cash Collection Efficiency</span>
+            <span class="ops-badge ${collectionPct >= 80 ? 'badge-ok' : 'badge-pending'}">${collectionPct}% Collected</span>
+          </div>
+          <div style="height: 10px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin-bottom: 6px;">
+            <div style="width: ${collectionPct}%; height: 100%; background: linear-gradient(90deg, #075545, #10b981); border-radius: 999px; transition: width 0.5s ease;"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: #64748b;">
+            <span>Collected: <strong>${currency}${cashRec.toFixed(2)}</strong></span>
+            <span>Billed: <strong>${currency}${totalRev.toFixed(2)}</strong></span>
+          </div>
+        </div>
+
+        <div class="ops-card" style="padding: 16px 18px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #075545;">Revenue Share by Division</span>
+            <span style="font-size: 11px; font-weight: 700; color: #64748b;">Fix ${fixPct}% &bull; Care ${carePct}% &bull; Watch ${watchPct}%</span>
+          </div>
+          <div style="height: 10px; background: #e2e8f0; border-radius: 999px; overflow: hidden; display: flex; margin-bottom: 6px;">
+            <div style="width: ${fixPct}%; height: 100%; background: #075545;" title="Civitas Fix: ${currency}${fixRev.toFixed(2)}"></div>
+            <div style="width: ${carePct}%; height: 100%; background: #E4693F;" title="Civitas Care: ${currency}${careRev.toFixed(2)}"></div>
+            <div style="width: ${watchPct}%; height: 100%; background: #2563eb;" title="Property Watch: ${currency}${watchRev.toFixed(2)}"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: #64748b;">
+            <span><strong style="color:#075545;">● Fix:</strong> ${currency}${fixRev.toFixed(0)}</span>
+            <span><strong style="color:#E4693F;">● Care:</strong> ${currency}${careRev.toFixed(0)}</span>
+            <span><strong style="color:#2563eb;">● Watch:</strong> ${currency}${watchRev.toFixed(0)}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Top Row: Money Overview -->
       <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0 0 14px 0; letter-spacing: 0.5px;">
         1. Financial &amp; Cash Flow Overview (${state.settings.reportingYear} YTD)
       </h2>
       <div class="ops-kpi-grid">
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Revenue Invoiced</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="receivables">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Revenue Invoiced</p>
+            <span class="kpi-drill-hint">Invoices &rarr;</span>
+          </div>
           <h3 style="font-size: 24px; font-weight: 800; color: #075545; margin: 0;">${currency}${totalRev.toFixed(2)}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Before tax, net of credit notes</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Cash Received</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="receivables">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Cash Received</p>
+            <span class="kpi-drill-hint">Receipts &rarr;</span>
+          </div>
           <h3 style="font-size: 24px; font-weight: 800; color: #15803d; margin: 0;">${currency}${cashRec.toFixed(2)}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Payments register only</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Outstanding Receivables</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="receivables">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Outstanding Receivables</p>
+            <span class="kpi-drill-hint">Ageing &rarr;</span>
+          </div>
           <h3 style="font-size: 24px; font-weight: 800; color: ${receivables > 0 ? '#b91c1c' : '#1e293b'}; margin: 0;">${currency}${receivables.toFixed(2)}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Unpaid invoice balances</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Operating Expenses</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="expenses">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Operating Expenses</p>
+            <span class="kpi-drill-hint">Expenses &rarr;</span>
+          </div>
           <h3 style="font-size: 24px; font-weight: 800; color: #1e293b; margin: 0;">${currency}${opex.toFixed(2)}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Overhead running costs</p>
         </div>
@@ -1082,26 +1211,38 @@ class OpsApp {
 
       <!-- Second Row: Margin & Balance Sheet -->
       <div class="ops-kpi-grid">
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Gross Contribution</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="financial">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Gross Contribution</p>
+            <span class="kpi-drill-hint">P&amp;L &rarr;</span>
+          </div>
           <h3 style="font-size: 22px; font-weight: 800; color: #075545; margin: 0;">${currency}${grossContr.toFixed(2)}</h3>
-          <p style="font-size: 11px; color: #15803d; margin: 4px 0 0 0; font-weight: 600;">Margin: ${mgmt.yearTotal.contributionMargin ? Math.round(mgmt.yearTotal.contributionMargin * 100) : 0}% (Min: 35%)</p>
+          <p style="font-size: 11px; color: #15803d; margin: 4px 0 0 0; font-weight: 600;">Margin: ${grossMarginPct}% (Min: 35%)</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Operating Profit / (Loss)</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="financial">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Operating Profit / (Loss)</p>
+            <span class="kpi-drill-hint">Accounts &rarr;</span>
+          </div>
           <h3 style="font-size: 22px; font-weight: 800; color: ${opProfit >= 0 ? '#15803d' : '#b91c1c'}; margin: 0;">${currency}${opProfit.toFixed(2)}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">After depreciation, before tax</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Available Cash Balance</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="financial">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Available Cash Balance</p>
+            <span class="kpi-drill-hint">Cash Flow &rarr;</span>
+          </div>
           <h3 style="font-size: 22px; font-weight: 800; color: #075545; margin: 0;">${currency}${cashBal.toFixed(2)}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Reserve threshold: ${currency}${state.settings.minimumCashReserve}</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Working Capital</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="financial">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Working Capital</p>
+            <span class="kpi-drill-hint">Balance Sheet &rarr;</span>
+          </div>
           <h3 style="font-size: 22px; font-weight: 800; color: #075545; margin: 0;">${currency}${workingCap.toFixed(2)}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Cash + Receivables &minus; Payables</p>
         </div>
@@ -1112,26 +1253,38 @@ class OpsApp {
         2. Sales &amp; Operations Activity
       </h2>
       <div class="ops-kpi-grid">
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Active Customers</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="sales">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Active Customers</p>
+            <span class="kpi-drill-hint">Clients &rarr;</span>
+          </div>
           <h3 style="font-size: 22px; font-weight: 800; color: #1e293b; margin: 0;">${activeCust}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Total registered: ${newCust}</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Enquiries Received</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="sales">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Enquiries Received</p>
+            <span class="kpi-drill-hint">Pipeline &rarr;</span>
+          </div>
           <h3 style="font-size: 22px; font-weight: 800; color: #1e293b; margin: 0;">${enqCount}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Pipeline opportunities</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Open Quotations Value</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="sales">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Open Quotations Value</p>
+            <span class="kpi-drill-hint">Quotes &rarr;</span>
+          </div>
           <h3 style="font-size: 22px; font-weight: 800; color: #E4693F; margin: 0;">${currency}${openQuoteVal.toFixed(2)}</h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Status: Sent; awaiting decision</p>
         </div>
 
-        <div class="ops-card">
-          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Jobs (Done / Overdue)</p>
+        <div class="ops-card ops-kpi-interactive" data-goto-tab="operations">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+            <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0;">Jobs (Done / Overdue)</p>
+            <span class="kpi-drill-hint">Dispatch &rarr;</span>
+          </div>
           <h3 style="font-size: 22px; font-weight: 800; color: #1e293b; margin: 0;">${jobsCompleted} / <span style="color: ${jobsOverdue > 0 ? '#b91c1c' : '#15803d'}">${jobsOverdue}</span></h3>
           <p style="font-size: 11px; color: var(--text-muted); margin: 4px 0 0 0;">Contractor Person-Days: ${contractorDays}</p>
         </div>
@@ -2476,6 +2629,29 @@ class OpsApp {
         const tab = btn.dataset.tab as ActiveTab;
         if (tab) this.setTab(tab);
       });
+    });
+
+    // Interactive KPI Cards & Quick-Jump Buttons ([data-goto-tab])
+    this.mountEl.querySelectorAll<HTMLElement>('[data-goto-tab]').forEach(el => {
+      el.addEventListener('click', () => {
+        const targetTab = el.getAttribute('data-goto-tab') as ActiveTab;
+        if (targetTab) {
+          this.setTab(targetTab);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    });
+
+    // Dashboard Quick Upload button
+    document.getElementById('btnDashQuickUpload')?.addEventListener('click', () => {
+      this.showSmartUploadModal('invoice');
+    });
+
+    // Global Live Table Search Input
+    const searchInput = document.getElementById('inputGlobalTableSearch') as HTMLInputElement | null;
+    searchInput?.addEventListener('input', () => {
+      this.tableSearchQuery = searchInput.value;
+      this.applyLiveTableFilter(this.tableSearchQuery);
     });
 
     // Top action buttons
@@ -4458,19 +4634,22 @@ An official PDF condition report is available upon request. Thank you for choosi
         try {
           const openPrintSuite = (document.getElementById('chkUplOpenPrintSuite') as HTMLInputElement)?.checked;
           const createdDocKeys: string[] = [];
+          let lastSummary = '';
 
           if (batchRows.length > 0) {
             const selected = batchRows.filter(r => r.selected);
             if (selected.length === 0) {
-              alert('Please select at least one row in the batch table.');
+              this.showToast('Selection Required', 'Please select at least one row in the batch table.', 'error');
               return;
             }
             for (const row of selected) {
               const res = opsStore.autoPostUploadedDocument(row);
+              lastSummary = res.summary;
               if (res.documentType === 'quote') createdDocKeys.push(`quote:${res.primaryId}`);
               else if (res.documentType === 'invoice') createdDocKeys.push(`invoice:${res.primaryId}`);
               else if (res.documentType === 'receipt') createdDocKeys.push(`receipt:${res.primaryId}`);
             }
+            lastSummary = `Auto-posted ${selected.length} batch document(s) & reconciled all ledgers.`;
           } else {
             const payload: UploadedDocumentPayload = {
               docType: docTypeEl.value as UploadedDocumentPayload['docType'],
@@ -4486,6 +4665,7 @@ An official PDF condition report is available upon request. Thank you for choosi
               autoRecordReceiptForInvoice: docTypeEl.value === 'invoice' && Boolean(chkAutoReceipt?.checked)
             };
             const res = opsStore.autoPostUploadedDocument(payload);
+            lastSummary = `${res.summary} (${res.relatedEntries.join(' · ')})`;
             if (res.documentType === 'quote') createdDocKeys.push(`quote:${res.primaryId}`);
             else if (res.documentType === 'invoice') createdDocKeys.push(`invoice:${res.primaryId}`);
             else if (res.documentType === 'receipt') createdDocKeys.push(`receipt:${res.primaryId}`);
@@ -4498,11 +4678,85 @@ An official PDF condition report is available upon request. Thank you for choosi
             this.currentTab = 'print';
           }
           this.render();
+          this.showToast('Smart Auto-Entry Complete', lastSummary, 'success');
         } catch (err: any) {
-          alert(err?.message || 'Failed to process uploaded document.');
+          this.showToast('Upload Error', err?.message || 'Failed to process uploaded document.', 'error');
         }
       });
     });
+  }
+
+  private applyLiveTableFilter(rawQuery: string): void {
+    const q = rawQuery.trim().toLowerCase();
+    const badge = document.getElementById('badgeSearchMatchCount');
+    const tables = this.mountEl.querySelectorAll<HTMLTableElement>('.ops-table');
+    let matchCount = 0;
+    let totalRows = 0;
+
+    tables.forEach(tbl => {
+      const rows = tbl.querySelectorAll<HTMLTableRowElement>('tbody tr');
+      rows.forEach(tr => {
+        totalRows++;
+        if (!q) {
+          tr.style.display = '';
+          return;
+        }
+        const text = (tr.textContent || '').toLowerCase();
+        if (text.includes(q)) {
+          tr.style.display = '';
+          matchCount++;
+        } else {
+          tr.style.display = 'none';
+        }
+      });
+    });
+
+    if (badge) {
+      if (!q) {
+        badge.textContent = 'Ctrl+K';
+        badge.style.background = '#e2e8f0';
+        badge.style.color = '#64748b';
+      } else {
+        badge.textContent = `${matchCount}/${totalRows}`;
+        badge.style.background = matchCount > 0 ? '#dcfce7' : '#fee2e2';
+        badge.style.color = matchCount > 0 ? '#15803d' : '#b91c1c';
+      }
+    }
+  }
+
+  private showToast(title: string, message: string, type: 'success' | 'error' = 'success'): void {
+    if (typeof document === 'undefined') return;
+    let container = document.getElementById('opsToastContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'opsToastContainer';
+      container.className = 'ops-toast-container';
+      document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `ops-toast ${type === 'error' ? 'toast-error' : ''}`;
+    toast.innerHTML = `
+      <div>
+        <div style="font-size: 12px; font-weight: 800; letter-spacing: 0.3px; margin-bottom: 2px; color: #fed7aa;">
+          ${type === 'error' ? '⚠️ ' : '✓ '}${this.escapeHtml(title)}
+        </div>
+        <div style="font-size: 11.5px; color: rgba(255,255,255,0.92); line-height: 1.4;">
+          ${this.escapeHtml(message)}
+        </div>
+      </div>
+      <button type="button" style="background: transparent; border: none; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 14px; line-height: 1;">&times;</button>
+    `;
+
+    toast.querySelector('button')?.addEventListener('click', () => toast.remove());
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(8px)';
+      toast.style.transition = 'all 0.25s ease';
+      setTimeout(() => toast.remove(), 260);
+    }, 4500);
   }
 
   private escapeHtml(str?: string): string {
