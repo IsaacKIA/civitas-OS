@@ -485,12 +485,34 @@
       "passwordHash": "cv21$U0001$04856f802103bf2619291807d43c7620",
       "status": "Active",
       "createdDate": "2026-01-01",
-      "lastLogin": "2026-11-12 08:34",
+      "lastLogin": "2026-11-12 09:34",
       "notes": "Executive sign-off authority (> GH₵500), Period Close lock, NEIP Grant custodian & User Governance.",
       "failedLoginAttempts": 0
     }
   ],
   "auditLogs": [
+    {
+      "id": "AUD-1794476064807-4488",
+      "timestamp": "2026-11-12T09:34:24.807Z",
+      "userId": "U0001",
+      "action": "LOGIN",
+      "entity": "UserSession",
+      "entityId": "U0001",
+      "actor": "Isaac Agya Koomson (Founder / CEO)",
+      "details": "Authenticated into Executive & Governance",
+      "entryHash": "aud21-e138934d94a5700e"
+    },
+    {
+      "id": "AUD-1794476054932-3533",
+      "timestamp": "2026-11-12T09:34:14.931Z",
+      "userId": "U0001",
+      "action": "LOGIN",
+      "entity": "UserSession",
+      "entityId": "U0001",
+      "actor": "Isaac Agya Koomson (Founder / CEO)",
+      "details": "Authenticated into Executive & Governance",
+      "entryHash": "aud21-0877dcd60e36d93b"
+    },
     {
       "id": "AUD-1794472468658-5677",
       "timestamp": "2026-11-12T08:34:28.657Z",
