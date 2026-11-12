@@ -70,3 +70,4 @@ If any operational issue occurs after an update:
    git checkout f7da9ce
    ```
 3. Restore the latest verified database snapshot from `backups/` or Desktop (`Civitas_Ops_Backup_2026-11-11.json`) using **`Restore JSON`**.
+

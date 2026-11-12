@@ -29,8 +29,21 @@ export type PayMethod = 'Bank transfer' | 'Mobile money' | 'Cash';
 export type ReconStatus = 'Unreconciled' | 'Reconciled';
 export type PayBasis = 'Per day' | 'Per assignment';
 export type PayStatus = 'Unpaid' | 'Paid';
-export type FundingSource = 'Own funds' | 'NEIP funding' | 'Operations (customer receipts)';
-export type FundSourceType = 'NEIP funding' | 'Founder capital' | 'Other';
+export type FundingSource =
+  | 'Own funds'
+  | 'NEIP funding'
+  | 'Other Grant / Donor'
+  | 'Loan facility'
+  | 'Operations (customer receipts)';
+export type FundSourceType =
+  | 'NEIP funding'
+  | 'Other Grant / Donor'
+  | 'Founder capital'
+  | 'Founder drawing'
+  | 'Bank / Microfinance Loan'
+  | 'Director / Shareholder Loan'
+  | 'Loan repayment'
+  | 'Other';
 export type FundStatus = 'Requested' | 'Approved' | 'Received' | 'Not secured' | 'Withdrawn';
 export type GrantCategoryCode = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
 export type GrantCategoryName = 
@@ -475,6 +488,16 @@ export interface FundingLine {
   reportingConditions?: string;
   documentReference?: string;
   notes?: string;
+  // Extended Capital, Grant, Loan & Drawing fields:
+  financingClass?:
+    | 'Equity Injection'
+    | 'Owner Drawing (Contra-Equity)'
+    | 'Restricted Grant'
+    | 'Debt Drawdown (Liability)'
+    | 'Debt Principal Repayment';
+  paymentMethod?: PayMethod;
+  lenderOrGrantor?: string;
+  interestRatePct?: number;
   // Calculated:
   cashFlag?: 'Received but no date' | 'Received more than approved' | '';
   idNumber?: number;

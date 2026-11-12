@@ -42,3 +42,4 @@
 - **Known Limitations:**
   1. Management accounts are reconciled from operational registers (single-entry sub-ledgers) rather than a full double-entry chart of accounts; statutory year-end IFRS financial statements and GRA tax filings require Chartered Accountant review.
   2. When deployed as a static bundle without the Node/Vite persistence middleware or Supabase backend, browser storage serves as the local fallback until synced or exported via `Backup JSON`.
+

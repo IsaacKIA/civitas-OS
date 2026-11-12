@@ -850,7 +850,15 @@ export function evaluateControlChecks(
   // Total 6: Funding received in the accounts equals the Funding sheet for the year
   const fundingYear = roundMoney(
     fundingLines
-      .filter(f => f.amountReceived > 0 && f.dateReceived && f.dateReceived >= yearStart && f.dateReceived <= yearEnd)
+      .filter(
+        f =>
+          f.source !== 'Founder drawing' &&
+          f.source !== 'Loan repayment' &&
+          f.amountReceived > 0 &&
+          f.dateReceived &&
+          f.dateReceived >= yearStart &&
+          f.dateReceived <= yearEnd
+      )
       .reduce((sum, f) => sum + f.amountReceived, 0)
   );
   const diff6 = Math.abs(mgmtAccounts.yearTotal.fundingReceived - fundingYear);

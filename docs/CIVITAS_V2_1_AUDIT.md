@@ -60,3 +60,4 @@ Every issue below was verified directly against the Version 2.0 codebase (`commi
 4. **Stage 4 — Financial Controls & Accounting Hardening (`src/store.ts`, `src/calculations.ts`):** Closed-period write protection, controlled period reopening with mandatory reason, 4-stage expense workflow (`Draft → Submitted → Approved/Rejected → Paid`) with Segregation of Duties, duplicate payment prevention, and credit note support.
 5. **Stage 5 & 6 — Operations Workflow Automation & Executive Dashboard (`src/store.ts`, `src/main.ts`):** One-click Enquiry → Quote → Job → Invoice → Payment progression and enhanced 12-indicator Executive Dashboard.
 6. **Stage 7 & 8 — Comprehensive QA Test Suite & Documentation (`src/ops.test.ts`, `docs/`):** Security, Financial, Data Integrity, and Operational automated tests plus Changelog, Test Report, Deployment Guide, and User Guide.
+

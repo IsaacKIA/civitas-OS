@@ -14,7 +14,7 @@ import {
   renderPrintMonthlyReportHtml,
   renderPrintInspectionHtml
 } from './reports.ts';
-import type { Customer, Property, Enquiry, Quote, Job, Assignment, Contractor, Invoice, Payment, Expense, PropertyInspection, SystemUser, UserRole, UserDepartment } from './types.ts';
+import type { Customer, Property, Enquiry, Quote, Job, Assignment, Contractor, Invoice, Payment, Expense, PropertyInspection, SystemUser, UserRole, UserDepartment, FundingLine, FundSourceType } from './types.ts';
 
 type ScreenMode = 'landing' | 'login' | 'dashboard';
 
@@ -233,7 +233,7 @@ class OpsApp {
             ` : ''}
             ${canSeeTab('grant') ? `
               <button class="sidebar-nav-item ops-nav-btn ${this.currentTab === 'grant' ? 'active' : ''}" data-tab="grant">
-                <span>Grant &amp; Funding</span>
+                <span>Capital, Grants &amp; Loans</span>
               </button>
             ` : ''}
 
@@ -376,7 +376,7 @@ class OpsApp {
       case 'operations': return 'Service Operations & Property Watch';
       case 'contractors': return 'Vetted Field Workforce & Assignments';
       case 'expenses': return 'Operating & Direct Expenses Ledger';
-      case 'grant': return 'NEIP Grant & Pre-Funding Accountability';
+      case 'grant': return 'Capital, Grants, Loans & Founder Drawings';
       case 'assets': return 'Equipment & Straight-Line Depreciation';
       case 'governance': return 'Risk Heat Map & Compliance Register';
       case 'checks': return '52 Automated Internal Control Checks';
@@ -1429,7 +1429,7 @@ class OpsApp {
               <td style="text-align: right; font-weight: 800; color: ${mgmt.yearTotal.operatingProfit >= 0 ? '#15803d' : '#b91c1c'};">${currency}${mgmt.yearTotal.operatingProfit.toFixed(2)}</td>
             </tr>
 
-            <tr style="background: #f1f5f9;"><td colspan="14" style="font-weight: 800; color: #075545;">CASH FLOW (By payment date)</td></tr>
+            <tr style="background: #f1f5f9;"><td colspan="14" style="font-weight: 800; color: #075545;">CASH FLOW (By payment date — Operating &amp; Financing)</td></tr>
             <tr style="background: #ffffff;">
               <td style="color: #64748b;">Opening Cash Balance</td>
               ${mgmt.months.map(m => `<td style="text-align: right; color: #64748b;">${currency}${m.openingCash.toFixed(2)}</td>`).join('')}
@@ -1439,7 +1439,12 @@ class OpsApp {
             ${renderMetricRow('Cash Paid: Expenses (Opex & Direct)', m => m.cashPaidOpexDirect)}
             ${renderMetricRow('Cash Paid: Capex Equipment', m => m.cashPaidCapex)}
             ${renderMetricRow('Cash Paid: Field Professionals', m => m.cashPaidLabour)}
-            ${renderMetricRow('Funding Received (Capital, not Revenue)', m => m.fundingReceived)}
+            ${renderMetricRow('Financing In: Founder Capital Introduced', m => m.founderCapitalIn)}
+            ${renderMetricRow('Financing In: Grants (NEIP & Donor Grants)', m => m.grantsReceived)}
+            ${renderMetricRow('Financing In: Loan Drawdowns (Debt)', m => m.loansReceived)}
+            ${renderMetricRow('Total Capital, Grants & Loans Received', m => m.fundingReceived, true, true)}
+            ${renderMetricRow('Financing Out: Founder Drawings (Contra-Equity)', m => m.founderDrawingsOut)}
+            ${renderMetricRow('Financing Out: Loan Principal Repayments', m => m.loanPrincipalRepaid)}
             <tr style="background: #FAF8F4;">
               <td style="font-weight: 700;">Net Cash Movement</td>
               ${mgmt.months.map(m => `<td style="text-align: right; font-weight: 700; color: ${m.netCashMovement >= 0 ? '#15803d' : '#b91c1c'};">${currency}${m.netCashMovement.toFixed(2)}</td>`).join('')}
@@ -1451,7 +1456,7 @@ class OpsApp {
               <td style="text-align: right; font-weight: 800; color: #075545;">${currency}${mgmt.yearTotal.closingCash.toFixed(2)}</td>
             </tr>
 
-            <tr style="background: #f1f5f9;"><td colspan="14" style="font-weight: 800; color: #075545;">BALANCE SHEET ITEMS (End of month)</td></tr>
+            <tr style="background: #f1f5f9;"><td colspan="14" style="font-weight: 800; color: #075545;">BALANCE SHEET &amp; CAPITAL STRUCTURE (End of month)</td></tr>
             <tr style="background: #ffffff;">
               <td style="color: #64748b;">Receivables (Unpaid Invoices)</td>
               ${mgmt.months.map(m => `<td style="text-align: right;">${currency}${m.receivables.toFixed(2)}</td>`).join('')}
@@ -1466,6 +1471,21 @@ class OpsApp {
               <td style="font-weight: 800; color: #075545;">WORKING CAPITAL</td>
               ${mgmt.months.map(m => `<td style="text-align: right; font-weight: 800; color: #075545;">${currency}${m.workingCapital.toFixed(2)}</td>`).join('')}
               <td style="text-align: right; font-weight: 800; color: #075545;">${currency}${mgmt.yearTotal.workingCapital.toFixed(2)}</td>
+            </tr>
+            <tr style="background: #ffffff;">
+              <td style="color: #9a3412; font-weight: 600;">Loans Payable (Debt Liability)</td>
+              ${mgmt.months.map(m => `<td style="text-align: right; color: #9a3412;">${currency}${m.loansPayable.toFixed(2)}</td>`).join('')}
+              <td style="text-align: right; font-weight: 700; color: #9a3412;">${currency}${mgmt.yearTotal.loansPayable.toFixed(2)}</td>
+            </tr>
+            <tr style="background: #ffffff;">
+              <td style="color: #1e40af; font-weight: 600;">Ring-Fenced Grant Reserve</td>
+              ${mgmt.months.map(m => `<td style="text-align: right; color: #1e40af;">${currency}${m.grantCapitalReserve.toFixed(2)}</td>`).join('')}
+              <td style="text-align: right; font-weight: 700; color: #1e40af;">${currency}${mgmt.yearTotal.grantCapitalReserve.toFixed(2)}</td>
+            </tr>
+            <tr style="background: #e2e8f0;">
+              <td style="font-weight: 800; color: #075545;">NET FOUNDER EQUITY (Capital &minus; Drawings + Retained Profit)</td>
+              ${mgmt.months.map(m => `<td style="text-align: right; font-weight: 800; color: #075545;">${currency}${m.netFounderEquity.toFixed(2)}</td>`).join('')}
+              <td style="text-align: right; font-weight: 800; color: #075545;">${currency}${mgmt.yearTotal.netFounderEquity.toFixed(2)}</td>
             </tr>
           </tbody>
         </table>
@@ -2131,9 +2151,19 @@ class OpsApp {
   }
 
   // ==========================================
-  // TAB 8: GRANT & NEIP FUNDING
+  // TAB 8: CAPITAL, GRANTS, LOANS & FOUNDER DRAWINGS
   // ==========================================
   private renderGrantTab(state: OpsDatabaseState, currency: string): string {
+    const canManageFunding = opsStore.canCurrentUser('MANAGE_FUNDING');
+    const mgmt = opsStore.getManagementAccounts();
+    const cashSummary = opsStore.getUnrestrictedCashSummary();
+
+    const totalFounderIn = mgmt.yearTotal.founderCapitalIn;
+    const totalFounderDrawings = mgmt.yearTotal.founderDrawingsOut;
+    const totalGrantsIn = mgmt.yearTotal.grantsReceived;
+    const totalLoansIn = mgmt.yearTotal.loansReceived;
+    const totalLoansRepaid = mgmt.yearTotal.loanPrincipalRepaid;
+
     const grantRowsHtml = state.grantBudget.map(cat => `
       <tr>
         <td style="font-weight: 700; text-align: center;">${cat.code}</td>
@@ -2148,36 +2178,144 @@ class OpsApp {
       </tr>
     `).join('');
 
-    const fundingRowsHtml = state.funding.map(f => `
-      <tr>
-        <td style="font-weight: 700; color: #075545;">${f.fundingId}</td>
-        <td style="font-weight: 600;">${f.source}</td>
-        <td>${f.description}</td>
-        <td><span class="ops-badge ${f.status === 'Received' ? 'badge-ok' : 'badge-pending'}">${f.status} (Planning Scenario)</span></td>
-        <td style="text-align: right;">${currency}${roundMoney(f.amountRequested).toFixed(2)}</td>
-        <td style="text-align: right;">${currency}${roundMoney(f.amountApproved).toFixed(2)}</td>
-        <td style="text-align: right; font-weight: 800; color: #15803d;">${currency}${roundMoney(f.amountReceived).toFixed(2)}</td>
-      </tr>
-    `).join('');
+    const fundingRowsHtml = state.funding.map(f => {
+      const isOutflow = f.source === 'Founder drawing' || f.source === 'Loan repayment';
+      const finClass =
+        f.financingClass ||
+        (f.source === 'Founder capital'
+          ? 'Equity Injection'
+          : f.source === 'Founder drawing'
+          ? 'Owner Drawing (Contra-Equity)'
+          : f.source === 'Bank / Microfinance Loan' || f.source === 'Director / Shareholder Loan'
+          ? 'Debt Drawdown (Liability)'
+          : f.source === 'Loan repayment'
+          ? 'Debt Principal Repayment'
+          : 'Restricted Grant');
+
+      const badgeColor = isOutflow
+        ? 'badge-attention'
+        : finClass === 'Equity Injection'
+        ? 'badge-ok'
+        : finClass === 'Restricted Grant'
+        ? 'badge-reconciled'
+        : 'badge-pending';
+
+      return `
+        <tr>
+          <td style="font-weight: 700; color: #075545;">${f.fundingId}</td>
+          <td style="font-weight: 700;">${f.source}</td>
+          <td><span class="ops-badge ${badgeColor}">${finClass}</span></td>
+          <td>
+            <div style="font-weight: 600;">${this.escapeHtml(f.description)}</div>
+            ${f.lenderOrGrantor || f.documentReference ? `<div style="font-size: 11px; color: #64748b;">${this.escapeHtml(f.lenderOrGrantor || '')} ${f.documentReference ? `• Ref: ${this.escapeHtml(f.documentReference)}` : ''} ${f.interestRatePct ? `• ${f.interestRatePct}% p.a.` : ''}</div>` : ''}
+          </td>
+          <td>${f.dateReceived || '-'}</td>
+          <td><span class="ops-badge ${f.status === 'Received' || f.status === 'Withdrawn' ? 'badge-ok' : 'badge-pending'}">${f.status}</span></td>
+          <td style="text-align: right;">${currency}${roundMoney(f.amountRequested).toFixed(2)}</td>
+          <td style="text-align: right;">${currency}${roundMoney(f.amountApproved).toFixed(2)}</td>
+          <td style="text-align: right; font-weight: 800; color: ${isOutflow ? '#b91c1c' : '#15803d'};">
+            ${isOutflow && f.amountReceived > 0 ? '&minus;' : f.amountReceived > 0 ? '+' : ''}${currency}${roundMoney(f.amountReceived).toFixed(2)}
+          </td>
+        </tr>
+      `;
+    }).join('');
 
     return `
+      <!-- Top Action Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 18px;">
+        <div>
+          <h2 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0;">
+            Capital Structure, Grants, Loans &amp; Founder Drawings
+          </h2>
+          <p style="font-size: 12px; color: var(--text-muted); margin: 2px 0 0 0;">
+            IFRS for SMEs &amp; ICAG Compliant Financing Ledger — strictly separates Equity, Drawings, Restricted Grants, and Debt from Revenue &amp; Opex.
+          </p>
+        </div>
+        ${canManageFunding ? `
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="btnNewFounderCapital" class="btn-brand-primary">
+              + Introduce Founder Capital
+            </button>
+            <button id="btnNewFounderDrawing" class="btn-brand-terracotta">
+              &minus; Record Founder Withdrawal (Drawing)
+            </button>
+            <button id="btnNewGrantOrLoan" class="btn-brand-outline" style="border-color: #075545; color: #075545; font-weight: 700;">
+              + Add Grant / Loan / Repayment
+            </button>
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- 4 Capital Structure & Solvency KPI Cards -->
+      <div class="ops-kpi-grid" style="margin-bottom: 20px;">
+        <div class="ops-card">
+          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Net Founder Equity</p>
+          <h3 style="font-size: 22px; font-weight: 800; color: #075545; margin: 0;">${currency}${cashSummary.netFounderEquity.toFixed(2)}</h3>
+          <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0;">
+            Injected: <strong>+${currency}${totalFounderIn.toFixed(0)}</strong> &bull; Drawings: <strong style="color:#b91c1c;">&minus;${currency}${totalFounderDrawings.toFixed(0)}</strong>
+          </p>
+        </div>
+
+        <div class="ops-card">
+          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Grants Received (NEIP &amp; Donors)</p>
+          <h3 style="font-size: 22px; font-weight: 800; color: #1e40af; margin: 0;">${currency}${totalGrantsIn.toFixed(2)}</h3>
+          <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0;">
+            Ring-Fenced Unspent Grant Cash: <strong>${currency}${cashSummary.unspentRestrictedGrantCash.toFixed(2)}</strong>
+          </p>
+        </div>
+
+        <div class="ops-card">
+          <p style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin: 0 0 6px 0;">Loans Payable (Debt Liability)</p>
+          <h3 style="font-size: 22px; font-weight: 800; color: #9a3412; margin: 0;">${currency}${cashSummary.loansPayable.toFixed(2)}</h3>
+          <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0;">
+            Drawn: <strong>+${currency}${totalLoansIn.toFixed(0)}</strong> &bull; Principal Repaid: <strong>&minus;${currency}${totalLoansRepaid.toFixed(0)}</strong>
+          </p>
+        </div>
+
+        <div class="ops-card" style="background: #f0fdf4; border-color: #bbf7d0;">
+          <p style="font-size: 11px; text-transform: uppercase; color: #075545; font-weight: 800; margin: 0 0 6px 0;">Unrestricted Withdrawable Cash</p>
+          <h3 style="font-size: 22px; font-weight: 800; color: #15803d; margin: 0;">${currency}${cashSummary.maxWithdrawableCash.toFixed(2)}</h3>
+          <p style="font-size: 11px; color: #166534; margin: 4px 0 0 0;">
+            After protecting Grants (${currency}${cashSummary.unspentRestrictedGrantCash.toFixed(0)}) &amp; Reserve (${currency}${cashSummary.minimumCashReserve})
+          </p>
+        </div>
+      </div>
+
+      <!-- Accounting Treatment Governance Banner -->
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #075545; padding: 12px 16px; border-radius: 8px; margin-bottom: 22px; font-size: 11.5px; color: #334155; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+        <div>
+          <strong style="color: #075545;">1. Founder Capital &amp; Drawings:</strong><br/>
+          Capital injections credit <em>Founder Equity</em> (never Revenue). Founder withdrawals debit <em>Founder Drawings (Contra-Equity)</em> (never Operating Expenses).
+        </div>
+        <div>
+          <strong style="color: #1e40af;">2. NEIP &amp; Donor Grants:</strong><br/>
+          Grant inflows are ring-fenced for approved grant categories. Automated controls block Founder Drawings from touching restricted grant cash.
+        </div>
+        <div>
+          <strong style="color: #9a3412;">3. Bank &amp; Microfinance Loans:</strong><br/>
+          Loan drawdowns create a <em>Loans Payable</em> liability on the Balance Sheet. Principal repayments reduce the liability; interest is recorded under Expenses.
+        </div>
+      </div>
+
       <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0 0 8px 0;">
-        1. Capital &amp; Grant Planning Scenarios vs. Actual Cash Received
+        1. Capital, Grants, Loans &amp; Founder Drawings Ledger
       </h2>
       <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 12px 0;">
-        Planning references (${currency}80,000 NEIP Grant Request &amp; ${currency}18,000 Pre-Funding Founder Capital) are strictly separated from actual cash received (${currency}0.00).
+        Planning scenarios (${currency}80,000 NEIP Grant Request &amp; ${currency}18,000 Pre-Funding Capital) are separated from actual settled cash movements.
       </p>
       <div class="ops-table-container" style="margin-bottom: 28px;">
         <table class="ops-table">
           <thead>
             <tr>
               <th>ID</th>
-              <th>Funding Source</th>
-              <th>Scenario Description</th>
+              <th>Source / Facility</th>
+              <th>Accounting Classification</th>
+              <th>Description &amp; Counterparty</th>
+              <th>Date</th>
               <th>Status</th>
               <th style="text-align: right;">Planned / Requested</th>
               <th style="text-align: right;">Approved</th>
-              <th style="text-align: right;">Actual Cash Received</th>
+              <th style="text-align: right;">Cash Movement</th>
             </tr>
           </thead>
           <tbody>
@@ -2734,6 +2872,9 @@ class OpsApp {
     document.getElementById('btnNewInspection')?.addEventListener('click', () => this.showNewInspectionModal());
     document.getElementById('btnNewUser')?.addEventListener('click', () => this.showNewUserModal());
     document.getElementById('btnTopbarAddUser')?.addEventListener('click', () => this.showNewUserModal());
+    document.getElementById('btnNewFounderCapital')?.addEventListener('click', () => this.showNewFundingModal('Founder capital'));
+    document.getElementById('btnNewFounderDrawing')?.addEventListener('click', () => this.showNewFundingModal('Founder drawing'));
+    document.getElementById('btnNewGrantOrLoan')?.addEventListener('click', () => this.showNewFundingModal('Bank / Microfinance Loan'));
 
     // Smart Upload & Auto-Entry Modal triggers
     document.getElementById('btnSmartUploadDoc')?.addEventListener('click', () => this.showSmartUploadModal('invoice'));
@@ -4732,6 +4873,180 @@ An official PDF condition report is available upon request. Thank you for choosi
         badge.style.color = matchCount > 0 ? '#15803d' : '#b91c1c';
       }
     }
+  }
+
+  private showNewFundingModal(defaultSource: FundSourceType = 'Founder capital'): void {
+    const nextId = opsStore.nextFundingId();
+    const cashSummary = opsStore.getUnrestrictedCashSummary();
+
+    const modalHtml = `
+      <div class="ops-modal-backdrop" id="opsModal">
+        <div class="ops-modal-content" style="max-width: 680px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px;">
+            <div>
+              <h3 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0 0 4px 0;">Record Financing Transaction (${nextId})</h3>
+              <p style="font-size: 12px; color: #64748b; margin: 0;">Chartered-Accountant Financing Ledger &bull; Equity, Grants, Loans &amp; Founder Drawings</p>
+            </div>
+            <span class="ops-badge badge-green">IFRS FOR SMEs</span>
+          </div>
+
+          <div id="fundAccountingPreview" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 12px; color: #064e3b;">
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; font-size: 11px;">
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px;">
+              <div style="color: #64748b; font-weight: 700;">UNRESTRICTED DRAWING LIMIT</div>
+              <div style="font-size: 14px; font-weight: 800; color: #075545; margin-top: 2px;">GH₵${cashSummary.maxWithdrawableCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px;">
+              <div style="color: #64748b; font-weight: 700;">RING-FENCED GRANT CASH</div>
+              <div style="font-size: 14px; font-weight: 800; color: #1d4ed8; margin-top: 2px;">GH₵${cashSummary.unspentRestrictedGrantCash.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+            </div>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px;">
+              <div style="color: #64748b; font-weight: 700;">OUTSTANDING LOANS PAYABLE</div>
+              <div style="font-size: 14px; font-weight: 800; color: #b45309; margin-top: 2px;">GH₵${cashSummary.loansPayable.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+            </div>
+          </div>
+
+          <form id="formNewFunding">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div>
+                <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Financing Transaction Type *</label>
+                <select id="fundSource" required style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 700; color: #0f172a;">
+                  <option value="Founder capital" ${defaultSource === 'Founder capital' ? 'selected' : ''}>+ Founder Capital Injection (Owner Equity)</option>
+                  <option value="Founder drawing" ${defaultSource === 'Founder drawing' ? 'selected' : ''}>− Founder Drawing / Withdrawal (Contra-Equity)</option>
+                  <option value="NEIP funding" ${defaultSource === 'NEIP funding' ? 'selected' : ''}>+ NEIP Grant Tranche (Restricted Grant Reserve)</option>
+                  <option value="Other Grant / Donor" ${defaultSource === 'Other Grant / Donor' ? 'selected' : ''}>+ Other Grant / Donor Fund (Restricted Grant Reserve)</option>
+                  <option value="Bank / Microfinance Loan" ${defaultSource === 'Bank / Microfinance Loan' ? 'selected' : ''}>+ Bank / Microfinance Loan Drawdown (Debt Liability)</option>
+                  <option value="Director / Shareholder Loan" ${defaultSource === 'Director / Shareholder Loan' ? 'selected' : ''}>+ Director / Shareholder Loan Advance (Debt Liability)</option>
+                  <option value="Loan repayment" ${defaultSource === 'Loan repayment' ? 'selected' : ''}>− Loan Principal Repayment (Reduces Loans Payable)</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Transaction Date *</label>
+                <input type="date" id="fundDate" required value="${formatYMD(new Date())}" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;">
+              </div>
+              <div>
+                <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Amount (GH₵) *</label>
+                <input type="number" id="fundAmount" required min="1" step="0.01" placeholder="e.g. 5000.00" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 700;">
+              </div>
+              <div>
+                <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Payment Channel *</label>
+                <select id="fundMethod" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                  <option value="Bank transfer">Bank transfer</option>
+                  <option value="Mobile money">Mobile money</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Counterparty / Grantor / Lender Name</label>
+                <input type="text" id="fundParty" value="${defaultSource === 'Founder capital' || defaultSource === 'Founder drawing' ? 'Isaac Agya Koomson (Founder)' : ''}" placeholder="e.g. Isaac Agya Koomson / Ecobank / Mastercard Foundation" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;">
+              </div>
+              <div>
+                <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Bank / MoMo / Resolution Reference *</label>
+                <input type="text" id="fundRef" required placeholder="e.g. EQ-INJ-2026-02 / DRW-2026-01 / LN-001" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;">
+              </div>
+              <div>
+                <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Budget / Allocation Category *</label>
+                <select id="fundCategory" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                  <option value="Working Capital">Working Capital</option>
+                  <option value="Founder Drawings / Distribution">Founder Drawings / Distribution</option>
+                  <option value="Debt Service / Loan Repayment">Debt Service / Loan Repayment</option>
+                  <option value="Tools & Equipment">Tools &amp; Equipment</option>
+                  <option value="Branding & Uniforms">Branding &amp; Uniforms</option>
+                  <option value="Transport / Mobility Support">Transport / Mobility Support</option>
+                  <option value="Digital / Admin Setup">Digital / Admin Setup</option>
+                  <option value="Reserve / Contingency">Reserve / Contingency</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Purpose / Resolution Notes *</label>
+                <input type="text" id="fundPurpose" required placeholder="e.g. Additional founder working capital injection" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;">
+              </div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px;">
+              <button type="button" id="btnModalCancel" class="btn-brand-outline">Cancel</button>
+              <button type="submit" class="btn-brand-primary">Post Financing Entry</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    this.showModal(modalHtml, () => {
+      const sourceEl = document.getElementById('fundSource') as HTMLSelectElement;
+      const catEl = document.getElementById('fundCategory') as HTMLSelectElement;
+      const partyEl = document.getElementById('fundParty') as HTMLInputElement;
+      const previewEl = document.getElementById('fundAccountingPreview') as HTMLElement;
+
+      const updatePreview = () => {
+        const src = sourceEl.value as FundSourceType;
+        if (src === 'Founder capital') {
+          catEl.value = 'Working Capital';
+          if (!partyEl.value) partyEl.value = 'Isaac Agya Koomson (Founder)';
+          previewEl.style.background = '#f0fdf4';
+          previewEl.style.borderColor = '#bbf7d0';
+          previewEl.innerHTML = `<strong>Double-Entry Accounting Treatment (Equity Injection):</strong><br/>• <strong>Debit:</strong> Cash &amp; Bank (+Asset) &nbsp;|&nbsp; <strong>Credit:</strong> Founder Capital / Owner Equity (+Equity)<br/>• <em>Excluded from Operating Revenue (GH₵0.00 P&amp;L distortion).</em>`;
+        } else if (src === 'Founder drawing') {
+          catEl.value = 'Founder Drawings / Distribution';
+          if (!partyEl.value) partyEl.value = 'Isaac Agya Koomson (Founder)';
+          previewEl.style.background = '#fef2f2';
+          previewEl.style.borderColor = '#fecaca';
+          previewEl.innerHTML = `<strong>Double-Entry Accounting Treatment (Founder Drawing / Contra-Equity):</strong><br/>• <strong>Debit:</strong> Founder Drawings (−Owner Equity) &nbsp;|&nbsp; <strong>Credit:</strong> Cash &amp; Bank (−Asset)<br/>• <em>Excluded from Operating Expenses. Guarded against withdrawing ring-fenced NEIP/Donor grants (Max withdrawable: <strong>GH₵${cashSummary.maxWithdrawableCash.toFixed(2)}</strong>).</em>`;
+        } else if (src === 'NEIP funding' || src === 'Other Grant / Donor') {
+          catEl.value = 'Tools & Equipment';
+          previewEl.style.background = '#eff6ff';
+          previewEl.style.borderColor = '#bfdbfe';
+          previewEl.innerHTML = `<strong>Double-Entry Accounting Treatment (Restricted Capital Grant):</strong><br/>• <strong>Debit:</strong> Cash &amp; Bank (+Restricted Asset) &nbsp;|&nbsp; <strong>Credit:</strong> Restricted Grant Reserve (+Equity Reserve)<br/>• <em>Ring-fenced from Founder Drawings; tracked for donor compliance &amp; verification.</em>`;
+        } else if (src === 'Bank / Microfinance Loan' || src === 'Director / Shareholder Loan') {
+          catEl.value = 'Working Capital';
+          previewEl.style.background = '#fffbeb';
+          previewEl.style.borderColor = '#fde68a';
+          previewEl.innerHTML = `<strong>Double-Entry Accounting Treatment (Debt / Loan Drawdown):</strong><br/>• <strong>Debit:</strong> Cash &amp; Bank (+Asset) &nbsp;|&nbsp; <strong>Credit:</strong> Loans Payable (+Liability)<br/>• <em>Not revenue. Creates a Balance Sheet repayment obligation.</em>`;
+        } else if (src === 'Loan repayment') {
+          catEl.value = 'Debt Service / Loan Repayment';
+          previewEl.style.background = '#fffbeb';
+          previewEl.style.borderColor = '#fde68a';
+          previewEl.innerHTML = `<strong>Double-Entry Accounting Treatment (Loan Principal Repayment):</strong><br/>• <strong>Debit:</strong> Loans Payable (−Liability) &nbsp;|&nbsp; <strong>Credit:</strong> Cash &amp; Bank (−Asset)<br/>• <em>Principal repayment reduces Balance Sheet debt (Max outstanding debt: <strong>GH₵${cashSummary.loansPayable.toFixed(2)}</strong>). Record loan interest in the Expenses tab under "Loan Interest / Finance Charges".</em>`;
+        }
+      };
+
+      sourceEl.addEventListener('change', updatePreview);
+      updatePreview();
+
+      document.getElementById('formNewFunding')?.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        try {
+          const src = sourceEl.value as FundSourceType;
+          const amt = parseFloat((document.getElementById('fundAmount') as HTMLInputElement).value);
+          const line: FundingLine = {
+            fundingId: nextId,
+            dateReceived: (document.getElementById('fundDate') as HTMLInputElement).value,
+            source: src,
+            status: 'Received',
+            amountRequested: amt,
+            amountApproved: amt,
+            amountReceived: amt,
+            lenderOrGrantor: partyEl.value.trim() || undefined,
+            description: (document.getElementById('fundPurpose') as HTMLInputElement).value.trim(),
+            reportingConditions: catEl.value,
+            paymentMethod: (document.getElementById('fundMethod') as HTMLSelectElement).value as any,
+            documentReference: (document.getElementById('fundRef') as HTMLInputElement).value.trim(),
+            notes: (document.getElementById('fundPurpose') as HTMLInputElement).value.trim()
+          };
+
+          opsStore.addFundingLine(line);
+          this.closeModal();
+          this.showToast(
+            'Financing Entry Posted',
+            `${line.fundingId} (${line.source}) of GH₵${amt.toLocaleString('en-US', { minimumFractionDigits: 2 })} posted & reconciled.`
+          );
+        } catch (err: any) {
+          alert(err?.message || 'Could not post financing transaction');
+        }
+      });
+    });
   }
 
   private showToast(title: string, message: string, type: 'success' | 'error' = 'success'): void {

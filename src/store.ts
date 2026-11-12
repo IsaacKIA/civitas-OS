@@ -1200,7 +1200,118 @@ export class OpsStore {
     this.saveToStorage();
   }
 
-  // Funding & Purchase Requests
+  // Funding, Capital, Grants, Loans & Founder Drawings
+  /**
+   * Computes unrestricted operating & founder cash available for Founder Drawings,
+   * strictly ring-fencing restricted Grants (NEIP & Donor Grants) and the Minimum Cash Reserve.
+   */
+  public getUnrestrictedCashSummary(): {
+    closingCash: number;
+    unspentRestrictedGrantCash: number;
+    minimumCashReserve: number;
+    maxWithdrawableCash: number;
+    loansPayable: number;
+    netFounderEquity: number;
+  } {
+    const mgmt = this.getManagementAccounts();
+    const closingCash = mgmt.yearTotal.closingCash;
+
+    const totalRestrictedGrantsReceived = this.state.funding
+      .filter(f => (f.source === 'NEIP funding' || f.source === 'Other Grant / Donor') && f.amountReceived > 0)
+      .reduce((sum, f) => sum + f.amountReceived, 0);
+
+    const totalRestrictedGrantsSpent = this.state.expenses
+      .filter(
+        e =>
+          (e.fundingSource === 'NEIP funding' || e.fundingSource === 'Other Grant / Donor') &&
+          e.paymentStatus === 'Paid'
+      )
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const unspentRestrictedGrantCash = Math.max(0, totalRestrictedGrantsReceived - totalRestrictedGrantsSpent);
+    const minimumCashReserve = this.state.settings.minimumCashReserve || 0;
+    const maxWithdrawableCash = Math.max(
+      0,
+      Math.round((closingCash - unspentRestrictedGrantCash - minimumCashReserve) * 100) / 100
+    );
+
+    return {
+      closingCash,
+      unspentRestrictedGrantCash,
+      minimumCashReserve,
+      maxWithdrawableCash,
+      loansPayable: mgmt.yearTotal.loansPayable,
+      netFounderEquity: mgmt.yearTotal.netFounderEquity
+    };
+  }
+
+  public addFundingLine(line: FundingLine, actor = 'Founder/CEO'): FundingLine {
+    this.enforcePermission('MANAGE_FUNDING');
+    if (this.state.funding.some(f => f.fundingId === line.fundingId)) {
+      throw new Error(`Duplicate Funding ID: ${line.fundingId}`);
+    }
+    const txDate = line.dateReceived || formatYMD(new Date());
+    if (line.amountReceived > 0 && txDate) {
+      this.assertPeriodOpen(txDate, 'Funding / Capital Transaction');
+    }
+
+    const summary = this.getUnrestrictedCashSummary();
+
+    if (line.source === 'Founder drawing') {
+      if (line.amountReceived <= 0) {
+        throw new Error('Founder drawing amount must be greater than zero.');
+      }
+      if (line.amountReceived > summary.maxWithdrawableCash) {
+        throw new Error(
+          `Accounting Control Block: Requested Founder Withdrawal (GH₵${line.amountReceived.toFixed(2)}) exceeds Unrestricted Withdrawable Cash (GH₵${summary.maxWithdrawableCash.toFixed(2)}). Ring-fenced Grant Funds (GH₵${summary.unspentRestrictedGrantCash.toFixed(2)}) and Minimum Cash Reserve (GH₵${summary.minimumCashReserve.toFixed(2)}) cannot be withdrawn as owner drawings.`
+        );
+      }
+    }
+
+    if (line.source === 'Loan repayment') {
+      if (line.amountReceived <= 0) {
+        throw new Error('Loan principal repayment amount must be greater than zero.');
+      }
+      if (line.amountReceived > summary.loansPayable) {
+        throw new Error(
+          `Accounting Control Block: Loan principal repayment (GH₵${line.amountReceived.toFixed(2)}) exceeds outstanding Loans Payable balance (GH₵${summary.loansPayable.toFixed(2)}). Record interest charges separately under Expenses.`
+        );
+      }
+    }
+
+    const normalizedLine: FundingLine = {
+      ...line,
+      dateReceived: line.amountReceived > 0 ? txDate : line.dateReceived,
+      amountApproved:
+        line.amountApproved >= line.amountReceived ? line.amountApproved : line.amountReceived,
+      amountRequested:
+        line.amountRequested >= line.amountReceived ? line.amountRequested : line.amountReceived,
+      financingClass:
+        line.financingClass ||
+        (line.source === 'Founder capital'
+          ? 'Equity Injection'
+          : line.source === 'Founder drawing'
+          ? 'Owner Drawing (Contra-Equity)'
+          : line.source === 'Bank / Microfinance Loan' || line.source === 'Director / Shareholder Loan'
+          ? 'Debt Drawdown (Liability)'
+          : line.source === 'Loan repayment'
+          ? 'Debt Principal Repayment'
+          : 'Restricted Grant')
+    };
+
+    this.state.funding.push(normalizedLine);
+    this.logAction(
+      'CREATE',
+      'Funding',
+      normalizedLine.fundingId,
+      this.getActorLabel(actor),
+      `${normalizedLine.source} (${normalizedLine.financingClass}): GH₵${normalizedLine.amountReceived.toFixed(2)} — ${normalizedLine.description}`
+    );
+    this.recalculateAll();
+    this.saveToStorage();
+    return this.state.funding.find(f => f.fundingId === normalizedLine.fundingId)!;
+  }
+
   public updateFunding(id: string, partial: Partial<FundingLine>, actor = 'Founder/CEO'): void {
     this.enforcePermission('MANAGE_FUNDING');
     const idx = this.state.funding.findIndex(f => f.fundingId === id);

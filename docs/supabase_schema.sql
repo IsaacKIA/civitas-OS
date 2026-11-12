@@ -162,3 +162,4 @@ DROP TRIGGER IF EXISTS trg_immutable_audit_logs ON civitas_audit_logs;
 CREATE TRIGGER trg_immutable_audit_logs
 BEFORE UPDATE OR DELETE ON civitas_audit_logs
 FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_modification();
+

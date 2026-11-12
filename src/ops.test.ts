@@ -621,4 +621,161 @@ describe('Civitas Operations & Financial Control System — Version 2.1 Suite', 
     });
   });
 
+  it('Capital, Grants, Loans & Founder Drawings: Proper equity, debt, and contra-equity treatment with grant ring-fencing', () => {
+    const store = new OpsStore();
+    store.loadState(createDemoState());
+    store.authenticateUser('admin@civitasestate.com', '2026');
+
+    const beforeAcct = store.getManagementAccounts();
+    const baseRevenue = beforeAcct.yearTotal.totalRevenue;
+    const baseOpex = beforeAcct.yearTotal.totalOpex;
+    const baseCash = beforeAcct.yearTotal.closingCash;
+
+    // 1. Founder injects additional GH₵15,000 equity capital
+    store.addFundingLine({
+      fundingId: 'FND0010',
+      dateReceived: '2026-07-10',
+      source: 'Founder capital',
+      status: 'Received',
+      amountRequested: 15000,
+      amountApproved: 15000,
+      amountReceived: 15000,
+      lenderOrGrantor: 'Isaac Agya Koomson (Founder)',
+      description: 'Additional Q3 working capital injection',
+      reportingConditions: 'Working Capital',
+      paymentMethod: 'Bank transfer',
+      documentReference: 'EQ-INJ-2026-07',
+      notes: 'Expansion working capital'
+    });
+
+    // 2. Receive Other Grant / Donor fund of GH₵10,000
+    store.addFundingLine({
+      fundingId: 'FND0011',
+      dateReceived: '2026-07-12',
+      source: 'Other Grant / Donor',
+      status: 'Received',
+      amountRequested: 10000,
+      amountApproved: 10000,
+      amountReceived: 10000,
+      lenderOrGrantor: 'Mastercard Foundation SME Fund',
+      description: 'Green estate maintenance equipment co-grant',
+      reportingConditions: 'Tools & Equipment',
+      paymentMethod: 'Bank transfer',
+      documentReference: 'MCF-GRT-2026-01',
+      notes: 'Restricted equipment grant'
+    });
+
+    // 3. Draw down a Bank / Microfinance Loan of GH₵8,000
+    store.addFundingLine({
+      fundingId: 'FND0012',
+      dateReceived: '2026-07-15',
+      source: 'Bank / Microfinance Loan',
+      status: 'Received',
+      amountRequested: 8000,
+      amountApproved: 8000,
+      amountReceived: 8000,
+      lenderOrGrantor: 'Ecobank SME Facility',
+      description: 'Short-term working capital facility',
+      reportingConditions: 'Working Capital',
+      paymentMethod: 'Bank transfer',
+      documentReference: 'ECO-LN-2026-01',
+      notes: 'Revolving credit drawdown'
+    });
+
+    // 4. Repay GH₵3,000 of Loan Principal (reduces Loans Payable to GH₵5,000)
+    store.addFundingLine({
+      fundingId: 'FND0013',
+      dateReceived: '2026-07-20',
+      source: 'Loan repayment',
+      status: 'Received',
+      amountRequested: 3000,
+      amountApproved: 3000,
+      amountReceived: 3000,
+      lenderOrGrantor: 'Ecobank SME Facility',
+      description: 'First principal installment repayment',
+      reportingConditions: 'Debt Service / Loan Repayment',
+      paymentMethod: 'Bank transfer',
+      documentReference: 'ECO-REP-2026-01',
+      notes: 'Loan principal reduction'
+    });
+
+    // Guardrail check: Attempting to repay GH₵6,000 principal when only GH₵5,000 is outstanding must be blocked
+    assert.throws(
+      () => store.addFundingLine({
+        fundingId: 'FND0014-BAD',
+        dateReceived: '2026-07-21',
+        source: 'Loan repayment',
+        status: 'Received',
+        amountRequested: 6000,
+        amountApproved: 6000,
+        amountReceived: 6000,
+        description: 'Excess principal repayment',
+        reportingConditions: 'Debt Service / Loan Repayment',
+        documentReference: 'ECO-REP-BAD',
+        notes: 'Should fail'
+      }),
+      /exceeds outstanding Loans Payable/,
+      'Over-repayment of loan principal must be blocked'
+    );
+
+    // 5. Record Founder Drawing / Withdrawal of GH₵2,500 (Contra-Equity)
+    store.addFundingLine({
+      fundingId: 'FND0014',
+      dateReceived: '2026-07-25',
+      source: 'Founder drawing',
+      status: 'Received',
+      amountRequested: 2500,
+      amountApproved: 2500,
+      amountReceived: 2500,
+      lenderOrGrantor: 'Isaac Agya Koomson (Founder)',
+      description: 'Founder personal drawing',
+      reportingConditions: 'Founder Drawings / Distribution',
+      paymentMethod: 'Bank transfer',
+      documentReference: 'DRW-2026-07',
+      notes: 'Approved founder equity withdrawal'
+    });
+
+    // Guardrail check: Attempting to withdraw GH₵100,000 (breaching ring-fenced grant cash & reserve) must be blocked
+    assert.throws(
+      () => store.addFundingLine({
+        fundingId: 'FND0015-BAD',
+        dateReceived: '2026-07-26',
+        source: 'Founder drawing',
+        status: 'Received',
+        amountRequested: 100000,
+        amountApproved: 100000,
+        amountReceived: 100000,
+        description: 'Excessive founder withdrawal touching grant funds',
+        reportingConditions: 'Founder Drawings / Distribution',
+        documentReference: 'DRW-BAD-01',
+        notes: 'Should fail ring-fence check'
+      }),
+      /exceeds Unrestricted Withdrawable Cash/,
+      'Founder drawing that breaches ring-fenced grant cash or minimum reserve must be blocked'
+    );
+
+    const afterAcct = store.getManagementAccounts();
+    // P&L must be 100% untouched by equity, grants, loans, principal repayments, or drawings
+    assert.strictEqual(afterAcct.yearTotal.totalRevenue, baseRevenue, 'Financing transactions must not distort P&L revenue');
+    assert.strictEqual(afterAcct.yearTotal.totalOpex, baseOpex, 'Founder drawings & principal repayments must not distort P&L operating expenses');
+
+    // Verify Balance Sheet & Financing Cash Flow lines
+    assert.strictEqual(afterAcct.yearTotal.founderCapitalIn, beforeAcct.yearTotal.founderCapitalIn + 15000);
+    assert.strictEqual(afterAcct.yearTotal.grantsReceived, beforeAcct.yearTotal.grantsReceived + 10000);
+    assert.strictEqual(afterAcct.yearTotal.loansReceived, 8000);
+    assert.strictEqual(afterAcct.yearTotal.loanPrincipalRepaid, 3000);
+    assert.strictEqual(afterAcct.yearTotal.loansPayable, 5000);
+    assert.strictEqual(afterAcct.yearTotal.founderDrawingsOut, 2500);
+    assert.strictEqual(afterAcct.yearTotal.netFounderEquity, roundMoney(beforeAcct.yearTotal.netFounderEquity + 15000 - 2500));
+    // Net cash change = +15,000 (capital) + 10,000 (grant) + 8,000 (loan) - 3,000 (repaid) - 2,500 (drawing) = +27,500
+    assert.strictEqual(afterAcct.yearTotal.closingCash, baseCash + 27500);
+
+    // Verify all 6 Reconciliation Control Totals remain RECONCILED (0.00 diff)
+    const evaluation = store.getChecksEvaluation();
+    evaluation.controlTotals.forEach(t => {
+      assert.strictEqual(t.status, 'RECONCILED', `Control total ${t.name} must remain RECONCILED`);
+      assert.strictEqual(t.countOrValue, 0.00, `Difference for ${t.name} must remain 0.00`);
+    });
+  });
+
 });

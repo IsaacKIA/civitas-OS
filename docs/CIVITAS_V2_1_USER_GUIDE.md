@@ -60,3 +60,4 @@ You do not need to re-type customer or job details at each step. Follow this 5-s
 2. Go to **`Users & Governance`** → **Section 3 (Month-End Period Close)**.
 3. Select the month and click **`🔒 Lock & Close Period`**.
 4. Once closed, no invoices, payments, expenses, or assignments can be added or edited in that month unless the Founder / CEO clicks **`🔓 Reopen`** and records a formal business reason.
+

@@ -68,6 +68,11 @@ export interface MonthManagementAccount {
   cashPaidCapex: number;
   cashPaidLabour: number;
   fundingReceived: number;
+  founderCapitalIn: number;
+  grantsReceived: number;
+  loansReceived: number;
+  founderDrawingsOut: number;
+  loanPrincipalRepaid: number;
   netCashMovement: number;
   closingCash: number;
 
@@ -75,6 +80,9 @@ export interface MonthManagementAccount {
   receivables: number;
   payables: number;
   workingCapital: number;
+  loansPayable: number;
+  netFounderEquity: number;
+  grantCapitalReserve: number;
 }
 
 export interface YearManagementAccounts {
@@ -115,12 +123,20 @@ export interface YearManagementAccounts {
     cashPaidCapex: number;
     cashPaidLabour: number;
     fundingReceived: number;
+    founderCapitalIn: number;
+    grantsReceived: number;
+    loansReceived: number;
+    founderDrawingsOut: number;
+    loanPrincipalRepaid: number;
     netCashMovement: number;
     closingCash: number; // At end of year (or latest month)
 
     receivables: number; // Current at report date / year end
     payables: number;
     workingCapital: number;
+    loansPayable: number;
+    netFounderEquity: number;
+    grantCapitalReserve: number;
   };
 }
 
@@ -258,14 +274,41 @@ export function generateManagementAccounts(
     );
     const cashPaidLabour = roundMoney(paidLabourAssignments.reduce((sum, a) => sum + (a.amount || 0), 0));
 
-    // Funding received (cash in bank, never revenue)
+    // Funding, Capital, Loans & Drawings (by dateReceived, never revenue or opex)
     const monthFunding = fundingLines.filter(
       f => f.amountReceived > 0 && f.dateReceived && f.dateReceived >= startStr && f.dateReceived <= endStr
     );
-    const fundingReceived = roundMoney(monthFunding.reduce((sum, f) => sum + f.amountReceived, 0));
+
+    const founderCapitalIn = roundMoney(
+      monthFunding
+        .filter(f => f.source === 'Founder capital')
+        .reduce((sum, f) => sum + f.amountReceived, 0)
+    );
+    const grantsReceived = roundMoney(
+      monthFunding
+        .filter(f => f.source === 'NEIP funding' || f.source === 'Other Grant / Donor' || f.source === 'Other')
+        .reduce((sum, f) => sum + f.amountReceived, 0)
+    );
+    const loansReceived = roundMoney(
+      monthFunding
+        .filter(f => f.source === 'Bank / Microfinance Loan' || f.source === 'Director / Shareholder Loan')
+        .reduce((sum, f) => sum + f.amountReceived, 0)
+    );
+    const founderDrawingsOut = roundMoney(
+      monthFunding
+        .filter(f => f.source === 'Founder drawing')
+        .reduce((sum, f) => sum + f.amountReceived, 0)
+    );
+    const loanPrincipalRepaid = roundMoney(
+      monthFunding
+        .filter(f => f.source === 'Loan repayment')
+        .reduce((sum, f) => sum + f.amountReceived, 0)
+    );
+
+    const fundingReceived = roundMoney(founderCapitalIn + grantsReceived + loansReceived);
 
     const totalCashIn = cashReceivedCustomers + fundingReceived;
-    const totalCashOut = cashPaidOpexDirect + cashPaidCapex + cashPaidLabour;
+    const totalCashOut = cashPaidOpexDirect + cashPaidCapex + cashPaidLabour + founderDrawingsOut + loanPrincipalRepaid;
     const netCashMovement = roundMoney(totalCashIn - totalCashOut);
     const closingCash = roundMoney(openingCash + netCashMovement);
 
@@ -289,6 +332,33 @@ export function generateManagementAccounts(
     const payables = roundMoney(unpaidExpensesToDate + unpaidAssignmentsToDate);
 
     const workingCapital = roundMoney(closingCash + receivables - payables);
+
+    // Cumulative Financing & Equity Position up to endStr
+    const cumFundingToDate = fundingLines.filter(
+      f => f.amountReceived > 0 && f.dateReceived && f.dateReceived <= endStr
+    );
+    const cumLoansIn = cumFundingToDate
+      .filter(f => f.source === 'Bank / Microfinance Loan' || f.source === 'Director / Shareholder Loan')
+      .reduce((sum, f) => sum + f.amountReceived, 0);
+    const cumLoansRepaid = cumFundingToDate
+      .filter(f => f.source === 'Loan repayment')
+      .reduce((sum, f) => sum + f.amountReceived, 0);
+    const loansPayable = roundMoney(Math.max(0, cumLoansIn - cumLoansRepaid));
+
+    const cumFounderCap = cumFundingToDate
+      .filter(f => f.source === 'Founder capital')
+      .reduce((sum, f) => sum + f.amountReceived, 0);
+    const cumFounderDrawings = cumFundingToDate
+      .filter(f => f.source === 'Founder drawing')
+      .reduce((sum, f) => sum + f.amountReceived, 0);
+    const cumOpProfitToDate = months.reduce((sum, prev) => sum + prev.operatingProfit, 0) + operatingProfit;
+    const netFounderEquity = roundMoney((settings.openingCashBalance || 0) + cumFounderCap - cumFounderDrawings + cumOpProfitToDate);
+
+    const grantCapitalReserve = roundMoney(
+      cumFundingToDate
+        .filter(f => f.source === 'NEIP funding' || f.source === 'Other Grant / Donor' || f.source === 'Other')
+        .reduce((sum, f) => sum + f.amountReceived, 0)
+    );
 
     months.push({
       monthIndex: m,
@@ -326,11 +396,19 @@ export function generateManagementAccounts(
       cashPaidCapex,
       cashPaidLabour,
       fundingReceived,
+      founderCapitalIn,
+      grantsReceived,
+      loansReceived,
+      founderDrawingsOut,
+      loanPrincipalRepaid,
       netCashMovement,
       closingCash,
       receivables,
       payables,
-      workingCapital
+      workingCapital,
+      loansPayable,
+      netFounderEquity,
+      grantCapitalReserve
     });
   }
 
@@ -350,6 +428,11 @@ export function generateManagementAccounts(
   const totalCashCapex = roundMoney(months.reduce((s, m) => s + m.cashPaidCapex, 0));
   const totalCashLab = roundMoney(months.reduce((s, m) => s + m.cashPaidLabour, 0));
   const totalFundingRec = roundMoney(months.reduce((s, m) => s + m.fundingReceived, 0));
+  const totalFounderCapIn = roundMoney(months.reduce((s, m) => s + m.founderCapitalIn, 0));
+  const totalGrantsRec = roundMoney(months.reduce((s, m) => s + m.grantsReceived, 0));
+  const totalLoansRec = roundMoney(months.reduce((s, m) => s + m.loansReceived, 0));
+  const totalFounderDrawingsOut = roundMoney(months.reduce((s, m) => s + m.founderDrawingsOut, 0));
+  const totalLoanRepaid = roundMoney(months.reduce((s, m) => s + m.loanPrincipalRepaid, 0));
   const totalNetCashMov = roundMoney(months.reduce((s, m) => s + m.netCashMovement, 0));
 
   const lastMonth = months[11];
@@ -388,11 +471,19 @@ export function generateManagementAccounts(
       cashPaidCapex: totalCashCapex,
       cashPaidLabour: totalCashLab,
       fundingReceived: totalFundingRec,
+      founderCapitalIn: totalFounderCapIn,
+      grantsReceived: totalGrantsRec,
+      loansReceived: totalLoansRec,
+      founderDrawingsOut: totalFounderDrawingsOut,
+      loanPrincipalRepaid: totalLoanRepaid,
       netCashMovement: totalNetCashMov,
       closingCash: lastMonth ? lastMonth.closingCash : 0,
       receivables: lastMonth ? lastMonth.receivables : 0,
       payables: lastMonth ? lastMonth.payables : 0,
-      workingCapital: lastMonth ? lastMonth.workingCapital : 0
+      workingCapital: lastMonth ? lastMonth.workingCapital : 0,
+      loansPayable: lastMonth ? lastMonth.loansPayable : 0,
+      netFounderEquity: lastMonth ? lastMonth.netFounderEquity : 0,
+      grantCapitalReserve: lastMonth ? lastMonth.grantCapitalReserve : 0
     }
   };
 }
