@@ -246,14 +246,24 @@ class OpsApp {
           </div>
 
           <!-- Sidebar Footer -->
-          <div style="padding: 14px 18px; border-top: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.2); font-size: 11px;">
-            <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px;">${currentUser.fullName}</div>
-            <div style="color: #fed7aa; font-weight: 600; font-size: 10px; margin-bottom: 10px;">${currentUser.role}</div>
-            <div style="display: flex; gap: 6px;">
-              <button id="btnGoLanding" class="btn-brand-outline" style="flex: 1; justify-content: center; color: #e2e8f0; border-color: rgba(255,255,255,0.25); padding: 5px 8px; font-size: 10px;">
-                Home
+          <div style="padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.22); font-size: 11px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+              <div style="width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, #E4693F, #c85229); color: #ffffff; font-weight: 800; font-size: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.25);">
+                ${currentUser.fullName.split(' ').filter(Boolean).slice(0, 2).map(n => n[0]).join('').toUpperCase()}
+              </div>
+              <div style="min-width: 0; flex: 1;">
+                <div style="font-weight: 700; color: #ffffff; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${currentUser.fullName}</div>
+                <div style="color: #fed7aa; font-weight: 600; font-size: 10px; display: flex; align-items: center; gap: 5px;">
+                  <span style="width: 6px; height: 6px; border-radius: 50%; background: #4ade80; display: inline-block;"></span>
+                  ${currentUser.role}
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="btnGoLanding" class="sidebar-footer-btn">
+                🏠 Home
               </button>
-              <button id="btnLogout" class="btn-brand-outline" style="flex: 1; justify-content: center; color: #fca5a5; border-color: rgba(252,165,165,0.35); padding: 5px 8px; font-size: 10px;">
+              <button id="btnLogout" class="sidebar-footer-btn-danger">
                 Sign Out
               </button>
             </div>

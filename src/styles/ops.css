@@ -318,7 +318,7 @@ textarea:focus {
 }
 
 .btn-brand-outline {
-  background: #ffffff;
+  background: transparent;
   border: 1px solid #cbd5e1;
   color: #334155;
   padding: 7px 13px;
@@ -334,8 +334,58 @@ textarea:focus {
 }
 
 .btn-brand-outline:hover {
-  background: #f8fafc;
+  background: rgba(15, 23, 42, 0.04);
   border-color: #94a3b8;
+  transform: translateY(-1px);
+}
+
+/* Sidebar Footer Action Buttons */
+.sidebar-footer-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  transition: all 0.18s var(--ease-spring);
+}
+
+.sidebar-footer-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.40);
+  transform: translateY(-1px);
+}
+
+.sidebar-footer-btn-danger {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  background: rgba(239, 68, 68, 0.16);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.38);
+  transition: all 0.18s var(--ease-spring);
+}
+
+.sidebar-footer-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.28);
+  color: #ffffff;
+  border-color: rgba(248, 113, 113, 0.65);
   transform: translateY(-1px);
 }
 
