@@ -1542,9 +1542,15 @@ class OpsApp {
         <td>${p.paymentDate}</td>
         <td style="font-weight: 600; color: #075545;">${p.invoiceNo}</td>
         <td>${p.customerName || 'N/A'}</td>
-        <td style="text-align: right; font-weight: 700; color: #15803d;">${currency}${roundMoney(p.amount).toFixed(2)}</td>
+        <td style="text-align: right; font-weight: 700; color: #15803d;">
+          ${currency}${roundMoney(p.amount).toFixed(2)}
+          ${p.whtDeductedAmount && p.whtDeductedAmount > 0 ? `<div style="font-size: 10px; color: #b45309; font-weight: 600;">Net Cash: ${currency}${roundMoney(p.amount - p.whtDeductedAmount).toFixed(2)} (WHT: ${currency}${roundMoney(p.whtDeductedAmount).toFixed(2)})</div>` : ''}
+        </td>
         <td>${p.method}</td>
-        <td style="font-family: monospace;">${p.reference || 'N/A'}</td>
+        <td style="font-family: monospace;">
+          ${p.reference || 'N/A'}
+          ${p.whtCertificateRef ? `<span class="ops-badge badge-pending" style="margin-left: 4px; font-size: 9px;">GRA WHT: ${p.whtCertificateRef}</span>` : ''}
+        </td>
         <td style="white-space: nowrap;">
           <span class="ops-badge ${p.reconciliationStatus === 'Reconciled' ? 'badge-ok' : 'badge-pending'}">
             ${p.reconciliationStatus}
@@ -1588,7 +1594,8 @@ class OpsApp {
         <h2 style="font-size: 16px; font-weight: 800; color: #075545; text-transform: uppercase; margin: 0;">
           Invoices &amp; Receivables Register
         </h2>
-        <div style="display: flex; gap: 8px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button id="btnRunRetainerBilling" class="btn-brand-outline" style="border-color: #1d4ed8; color: #1d4ed8; font-weight: 700;" title="Auto-generate monthly recurring jobs, inspections &amp; invoices for active Civitas Care &amp; Property Watch retainers">⚡ Run Monthly Retainer Billing</button>
           <button id="btnUploadInvoiceQuick" class="btn-brand-outline" style="border-color: #075545; color: #075545; font-weight: 700;">📤 Upload Invoice</button>
           <button id="btnNewInvoice" class="btn-brand-primary">+ Create Invoice</button>
         </div>
@@ -2875,6 +2882,24 @@ class OpsApp {
     document.getElementById('btnNewFounderCapital')?.addEventListener('click', () => this.showNewFundingModal('Founder capital'));
     document.getElementById('btnNewFounderDrawing')?.addEventListener('click', () => this.showNewFundingModal('Founder drawing'));
     document.getElementById('btnNewGrantOrLoan')?.addEventListener('click', () => this.showNewFundingModal('Bank / Microfinance Loan'));
+    document.getElementById('btnRunRetainerBilling')?.addEventListener('click', () => {
+      try {
+        const res = opsStore.runMonthlyRetainerBilling();
+        if (res.invoicesCreated.length === 0) {
+          this.showToast(
+            'Retainer Billing Up to Date',
+            `All active Civitas Care & Property Watch properties have already been billed for ${res.monthKey}.`
+          );
+        } else {
+          this.showToast(
+            `Monthly Retainers Billed (${res.monthKey})`,
+            `Created ${res.jobsCreated.length} Jobs, ${res.inspectionsCreated.length} Inspections & ${res.invoicesCreated.length} Invoices totalling GH₵${res.totalBilledNet.toLocaleString('en-US', { minimumFractionDigits: 2 })}.`
+          );
+        }
+      } catch (err: any) {
+        alert(err?.message || 'Could not run monthly retainer billing');
+      }
+    });
 
     // Smart Upload & Auto-Entry Modal triggers
     document.getElementById('btnSmartUploadDoc')?.addEventListener('click', () => this.showSmartUploadModal('invoice'));
@@ -3971,22 +3996,25 @@ An official PDF condition report is available upon request. Thank you for choosi
   private showNewPaymentModal(): void {
     const nextId = opsStore.nextPaymentId();
     const state = opsStore.getState();
+    const openInvoices = state.invoices.filter(i => (i.balance || 0) > 0);
+    const defaultBal = openInvoices[0]?.balance || 0;
+
     const modalHtml = `
       <div class="ops-modal-backdrop" id="opsModal">
-        <div class="ops-modal-content">
-          <h3 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0 0 16px 0;">Record Cash Receipt (${nextId})</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 14px 0;">Cash received is recorded here only, never from invoices. Cash &ne; Revenue.</p>
+        <div class="ops-modal-content" style="max-width: 620px;">
+          <h3 style="font-size: 18px; font-weight: 800; color: #075545; margin: 0 0 6px 0;">Record Cash Receipt (${nextId})</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 14px 0;">Cash received is recorded here only, never from invoices. Supports Ghana GRA 7.5% Withholding Tax (WHT) at source.</p>
           <form id="formNewPayment">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
               <div>
                 <label style="font-size: 12px; font-weight: 700; color: #475569;">Target Invoice *</label>
                 <select id="payInvoice" required style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;">
-                  ${state.invoices.filter(i => (i.balance || 0) > 0).map(i => `<option value="${i.invoiceNo}">${i.invoiceNo} &bull; ${i.customerName} (Bal: GH₵${i.balance})</option>`).join('')}
+                  ${openInvoices.map(i => `<option value="${i.invoiceNo}" data-balance="${i.balance}">${i.invoiceNo} &bull; ${i.customerName} (Bal: GH₵${(i.balance || 0).toFixed(2)})</option>`).join('')}
                 </select>
               </div>
               <div>
-                <label style="font-size: 12px; font-weight: 700; color: #475569;">Amount Received (GH₵) *</label>
-                <input type="number" id="payAmount" required min="0.01" step="0.01" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                <label style="font-size: 12px; font-weight: 700; color: #475569;">Gross Invoice Amount Settled (GH₵) *</label>
+                <input type="number" id="payAmount" required min="0.01" step="0.01" value="${defaultBal > 0 ? defaultBal.toFixed(2) : ''}" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 700;">
               </div>
               <div>
                 <label style="font-size: 12px; font-weight: 700; color: #475569;">Payment Method</label>
@@ -4001,6 +4029,27 @@ An official PDF condition report is available upon request. Thank you for choosi
                 <input type="text" id="payRef" required placeholder="MoMo / Bank transaction reference" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;">
               </div>
             </div>
+
+            <!-- Ghana GRA Withholding Tax (WHT 7.5%) Section -->
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: #0f172a; cursor: pointer;">
+                <input type="checkbox" id="payWhtToggle" style="width: 15px; height: 15px; accent-color: #075545;">
+                Corporate / Institutional Client Deducted 7.5% GRA Withholding Tax (WHT) at Source
+              </label>
+              <div id="payWhtFields" style="display: none; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
+                <div>
+                  <label style="font-size: 11px; font-weight: 700; color: #475569;">GRA WHT Deducted (7.5% Default, GH₵)</label>
+                  <input type="number" id="payWhtAmt" min="0" step="0.01" value="0.00" style="width: 100%; padding: 7px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                </div>
+                <div>
+                  <label style="font-size: 11px; font-weight: 700; color: #475569;">GRA WHT Credit Certificate Ref</label>
+                  <input type="text" id="payWhtCert" placeholder="e.g. GRA-WHT-2026-0091" style="width: 100%; padding: 7px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                </div>
+              </div>
+              <div id="payWhtSummary" style="display: none; margin-top: 8px; font-size: 11.5px; color: #064e3b; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 8px 10px; border-radius: 6px;">
+              </div>
+            </div>
+
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
               <button type="button" id="btnModalCancel" class="btn-brand-outline">Cancel</button>
               <button type="submit" class="btn-brand-primary">Record Payment</button>
@@ -4011,20 +4060,72 @@ An official PDF condition report is available upon request. Thank you for choosi
     `;
 
     this.showModal(modalHtml, () => {
+      const invSel = document.getElementById('payInvoice') as HTMLSelectElement;
+      const amtInput = document.getElementById('payAmount') as HTMLInputElement;
+      const whtToggle = document.getElementById('payWhtToggle') as HTMLInputElement;
+      const whtFields = document.getElementById('payWhtFields') as HTMLElement;
+      const whtAmtInput = document.getElementById('payWhtAmt') as HTMLInputElement;
+      const whtSummary = document.getElementById('payWhtSummary') as HTMLElement;
+
+      const refreshWhtCalc = (recalc75 = false) => {
+        const gross = parseFloat(amtInput.value) || 0;
+        if (!whtToggle.checked) {
+          whtFields.style.display = 'none';
+          whtSummary.style.display = 'none';
+          whtAmtInput.value = '0.00';
+          return;
+        }
+        whtFields.style.display = 'grid';
+        whtSummary.style.display = 'block';
+        if (recalc75) {
+          whtAmtInput.value = roundMoney(gross * 0.075).toFixed(2);
+        }
+        const wht = parseFloat(whtAmtInput.value) || 0;
+        const netCash = roundMoney(Math.max(0, gross - wht));
+        whtSummary.innerHTML = `<strong>Double-Entry WHT Settlement:</strong> Invoice settled by <strong>GH₵${gross.toFixed(2)}</strong> &bull; GRA WHT Credit booked: <strong>GH₵${wht.toFixed(2)}</strong> &bull; Net Bank/MoMo Cash Deposited: <strong>GH₵${netCash.toFixed(2)}</strong>`;
+      };
+
+      invSel?.addEventListener('change', () => {
+        const opt = invSel.selectedOptions[0];
+        const bal = parseFloat(opt?.getAttribute('data-balance') || '0');
+        if (bal > 0) {
+          amtInput.value = bal.toFixed(2);
+          refreshWhtCalc(true);
+        }
+      });
+
+      amtInput?.addEventListener('input', () => refreshWhtCalc(true));
+      whtToggle?.addEventListener('change', () => refreshWhtCalc(true));
+      whtAmtInput?.addEventListener('input', () => refreshWhtCalc(false));
+
       document.getElementById('formNewPayment')?.addEventListener('submit', (ev) => {
         ev.preventDefault();
-        const p: Payment = {
-          paymentId: nextId,
-          paymentDate: formatYMD(new Date()),
-          invoiceNo: (document.getElementById('payInvoice') as HTMLSelectElement).value,
-          amount: parseFloat((document.getElementById('payAmount') as HTMLInputElement).value),
-          method: (document.getElementById('payMethod') as HTMLSelectElement).value as any,
-          reference: (document.getElementById('payRef') as HTMLInputElement).value,
-          receivedBy: 'Founder/CEO',
-          reconciliationStatus: 'Unreconciled'
-        };
-        opsStore.addPayment(p);
-        this.closeModal();
+        try {
+          const grossAmt = parseFloat(amtInput.value);
+          const whtAmt = whtToggle.checked ? (parseFloat(whtAmtInput.value) || 0) : 0;
+          const whtCert = (document.getElementById('payWhtCert') as HTMLInputElement)?.value.trim();
+
+          const p: Payment = {
+            paymentId: nextId,
+            paymentDate: formatYMD(new Date()),
+            invoiceNo: invSel.value,
+            amount: grossAmt,
+            method: (document.getElementById('payMethod') as HTMLSelectElement).value as any,
+            reference: (document.getElementById('payRef') as HTMLInputElement).value,
+            receivedBy: 'Founder/CEO',
+            reconciliationStatus: 'Unreconciled'
+          };
+          opsStore.addPayment(p, 'Founder/CEO', whtAmt, whtCert);
+          this.closeModal();
+          this.showToast(
+            'Payment Recorded',
+            whtAmt > 0
+              ? `${nextId} settled GH₵${grossAmt.toFixed(2)} (Net Cash: GH₵${roundMoney(grossAmt - whtAmt).toFixed(2)}, GRA WHT: GH₵${whtAmt.toFixed(2)}).`
+              : `${nextId} of GH₵${grossAmt.toFixed(2)} recorded for ${p.invoiceNo}.`
+          );
+        } catch (err: any) {
+          alert(err?.message || 'Could not record payment');
+        }
       });
     });
   }
@@ -4964,6 +5065,11 @@ An official PDF condition report is available upon request. Thank you for choosi
                 <label style="font-size: 12px; font-weight: 700; color: #334155; display: block; margin-bottom: 4px;">Purpose / Resolution Notes *</label>
                 <input type="text" id="fundPurpose" required placeholder="e.g. Additional founder working capital injection" style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;">
               </div>
+              <div id="fundInterestRow" style="display: none; grid-column: span 2; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 12px;">
+                <label style="font-size: 12px; font-weight: 700; color: #92400e; display: block; margin-bottom: 4px;">Optional: Concurrent Loan Interest / Finance Charge Component (GH₵)</label>
+                <input type="number" id="fundInterestAmt" min="0" step="0.01" value="0.00" placeholder="e.g. 450.00 (Booked automatically to P&L Operating Expenses)" style="width: 100%; padding: 7px 10px; border: 1px solid #fcd34d; border-radius: 6px;">
+                <div style="font-size: 11px; color: #b45309; margin-top: 4px;">If your bank installment includes both Principal and Interest, enter the Principal above and the Interest here—the system splits them automatically into Balance Sheet Debt Reduction + P&amp;L Finance Expense.</div>
+              </div>
             </div>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px;">
               <button type="button" id="btnModalCancel" class="btn-brand-outline">Cancel</button>
@@ -4982,6 +5088,8 @@ An official PDF condition report is available upon request. Thank you for choosi
 
       const updatePreview = () => {
         const src = sourceEl.value as FundSourceType;
+        const intRow = document.getElementById('fundInterestRow') as HTMLElement | null;
+        if (intRow) intRow.style.display = src === 'Loan repayment' ? 'block' : 'none';
         if (src === 'Founder capital') {
           catEl.value = 'Working Capital';
           if (!partyEl.value) partyEl.value = 'Isaac Agya Koomson (Founder)';
@@ -5036,11 +5144,17 @@ An official PDF condition report is available upon request. Thank you for choosi
             notes: (document.getElementById('fundPurpose') as HTMLInputElement).value.trim()
           };
 
-          opsStore.addFundingLine(line);
+          const interestAmt = src === 'Loan repayment'
+            ? (parseFloat((document.getElementById('fundInterestAmt') as HTMLInputElement)?.value || '0') || 0)
+            : 0;
+
+          opsStore.addFundingLine(line, 'Founder/CEO', interestAmt);
           this.closeModal();
           this.showToast(
             'Financing Entry Posted',
-            `${line.fundingId} (${line.source}) of GH₵${amt.toLocaleString('en-US', { minimumFractionDigits: 2 })} posted & reconciled.`
+            interestAmt > 0
+              ? `${line.fundingId} Principal GH₵${amt.toFixed(2)} + Interest Expense GH₵${interestAmt.toFixed(2)} split & reconciled.`
+              : `${line.fundingId} (${line.source}) of GH₵${amt.toLocaleString('en-US', { minimumFractionDigits: 2 })} posted & reconciled.`
           );
         } catch (err: any) {
           alert(err?.message || 'Could not post financing transaction');

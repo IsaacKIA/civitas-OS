@@ -412,6 +412,8 @@ export interface Payment {
   reconciliationStatus: ReconStatus;
   reconciledDate?: string;
   notes?: string;
+  whtDeductedAmount?: number;
+  whtCertificateRef?: string;
   // Calculated:
   customerId?: string;
   customerName?: string;

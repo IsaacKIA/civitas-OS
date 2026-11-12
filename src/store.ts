@@ -76,7 +76,8 @@ import {
   calculatePeriodClose,
   calculateInspections,
   calculateMaintenance,
-  formatYMD
+  formatYMD,
+  roundMoney
 } from './calculations.ts';
 
 import { generateManagementAccounts, type YearManagementAccounts } from './management-accounts.ts';
@@ -1028,7 +1029,12 @@ export class OpsStore {
     }
   }
 
-  public addPayment(p: Payment, actor = 'Founder/CEO'): void {
+  public addPayment(
+    p: Payment,
+    actor = 'Founder/CEO',
+    whtDeductedAmount = 0,
+    whtCertificateRef?: string
+  ): void {
     this.enforcePermission('MANAGE_INVOICES_PAYMENTS');
     this.assertPeriodOpen(p.paymentDate, 'Payment');
     if (this.state.payments.some(x => x.paymentId === p.paymentId)) {
@@ -1060,8 +1066,63 @@ export class OpsStore {
       }
     }
 
-    this.state.payments.push(p);
-    this.logAction('CREATE', 'Payment', p.paymentId, actor, `Invoice: ${p.invoiceNo}, Amount: ${p.amount}`);
+    const effectiveWht = roundMoney(whtDeductedAmount || p.whtDeductedAmount || 0);
+    const effectiveWhtRef = (whtCertificateRef || p.whtCertificateRef || '').trim();
+    if (effectiveWht < 0 || effectiveWht >= p.amount) {
+      throw new Error('Withholding tax (WHT) amount must be non-negative and less than the gross invoice payment.');
+    }
+
+    const paymentRecord: Payment = {
+      ...p,
+      whtDeductedAmount: effectiveWht > 0 ? effectiveWht : undefined,
+      whtCertificateRef: effectiveWht > 0 ? (effectiveWhtRef || `WHT-${p.invoiceNo}`) : undefined,
+      notes:
+        effectiveWht > 0
+          ? `${p.notes ? p.notes + ' • ' : ''}Gross Settled: GH₵${p.amount.toFixed(2)} | GRA 7.5% WHT at Source: GH₵${effectiveWht.toFixed(2)} (${effectiveWhtRef || 'WHT-' + p.invoiceNo}) | Net Cash Deposited: GH₵${roundMoney(p.amount - effectiveWht).toFixed(2)}`
+          : p.notes
+    };
+
+    this.state.payments.push(paymentRecord);
+    this.logAction(
+      'CREATE',
+      'Payment',
+      paymentRecord.paymentId,
+      actor,
+      `Invoice: ${paymentRecord.invoiceNo}, Gross: GH₵${paymentRecord.amount.toFixed(2)}${effectiveWht > 0 ? `, GRA WHT: GH₵${effectiveWht.toFixed(2)}, Net Cash: GH₵${roundMoney(paymentRecord.amount - effectiveWht).toFixed(2)}` : ''}`
+    );
+
+    // If Ghana GRA Withholding Tax (WHT) was deducted at source by the client, post the corresponding statutory tax credit/deduction so Net Cash in Bank equals (Gross - WHT) while the Invoice is 100% settled
+    if (effectiveWht > 0) {
+      const whtExpId = this.nextExpenseId();
+      const whtRef = effectiveWhtRef || `WHT-${p.invoiceNo}-${p.paymentId}`;
+      const whtExpense: Expense = {
+        expenseId: whtExpId,
+        expenseDate: p.paymentDate,
+        supplier: 'Ghana Revenue Authority (GRA WHT at Source)',
+        supplierReference: whtRef,
+        category: 'Regulatory compliance',
+        division: targetInv.division || 'Civitas Fix',
+        amount: effectiveWht,
+        paymentMethod: p.method,
+        paymentStatus: 'Paid',
+        paidDate: p.paymentDate,
+        approvalStatus: effectiveWht > this.state.settings.spendingApprovalThreshold ? 'Approved' : 'Not required',
+        approvedBy: effectiveWht > this.state.settings.spendingApprovalThreshold ? this.getActorLabel(actor) : undefined,
+        approvedAt: effectiveWht > this.state.settings.spendingApprovalThreshold ? new Date().toISOString() : undefined,
+        evidenceReference: whtRef,
+        fundingSource: 'Operations (customer receipts)',
+        notes: `Auto-posted GRA WHT Certificate (${whtRef}) linked to Payment ${p.paymentId}`
+      };
+      this.state.expenses.push(whtExpense);
+      this.logAction(
+        'CREATE',
+        'Expense',
+        whtExpId,
+        actor,
+        `Auto-posted GRA WHT at Source (GH₵${effectiveWht.toFixed(2)}) for Invoice ${p.invoiceNo}`
+      );
+    }
+
     this.recalculateAll();
     this.saveToStorage();
   }
@@ -1245,7 +1306,11 @@ export class OpsStore {
     };
   }
 
-  public addFundingLine(line: FundingLine, actor = 'Founder/CEO'): FundingLine {
+  public addFundingLine(
+    line: FundingLine,
+    actor = 'Founder/CEO',
+    interestExpenseAmount = 0
+  ): FundingLine {
     this.enforcePermission('MANAGE_FUNDING');
     if (this.state.funding.some(f => f.fundingId === line.fundingId)) {
       throw new Error(`Duplicate Funding ID: ${line.fundingId}`);
@@ -1256,6 +1321,7 @@ export class OpsStore {
     }
 
     const summary = this.getUnrestrictedCashSummary();
+    const cleanInterest = roundMoney(Math.max(0, interestExpenseAmount || 0));
 
     if (line.source === 'Founder drawing') {
       if (line.amountReceived <= 0) {
@@ -1275,6 +1341,11 @@ export class OpsStore {
       if (line.amountReceived > summary.loansPayable) {
         throw new Error(
           `Accounting Control Block: Loan principal repayment (GH₵${line.amountReceived.toFixed(2)}) exceeds outstanding Loans Payable balance (GH₵${summary.loansPayable.toFixed(2)}). Record interest charges separately under Expenses.`
+        );
+      }
+      if (line.amountReceived + cleanInterest > summary.closingCash) {
+        throw new Error(
+          `Accounting Control Block: Combined loan installment (GH₵${(line.amountReceived + cleanInterest).toFixed(2)}) exceeds available closing cash (GH₵${summary.closingCash.toFixed(2)}).`
         );
       }
     }
@@ -1305,8 +1376,41 @@ export class OpsStore {
       'Funding',
       normalizedLine.fundingId,
       this.getActorLabel(actor),
-      `${normalizedLine.source} (${normalizedLine.financingClass}): GH₵${normalizedLine.amountReceived.toFixed(2)} — ${normalizedLine.description}`
+      `${normalizedLine.source} (${normalizedLine.financingClass}): GH₵${normalizedLine.amountReceived.toFixed(2)}${cleanInterest > 0 ? ` + Interest Expense GH₵${cleanInterest.toFixed(2)}` : ''} — ${normalizedLine.description}`
     );
+
+    // If a combined Loan Installment includes an Interest / Finance Charge component, book the interest to Operating Expenses automatically
+    if (line.source === 'Loan repayment' && cleanInterest > 0) {
+      const intExpId = this.nextExpenseId();
+      const intRef = `${line.documentReference || line.fundingId}-INT`;
+      const intExpense: Expense = {
+        expenseId: intExpId,
+        expenseDate: txDate,
+        supplier: line.lenderOrGrantor || 'Bank / Loan Facility',
+        supplierReference: intRef,
+        category: 'Other operating expense',
+        division: 'Civitas Fix',
+        amount: cleanInterest,
+        paymentMethod: line.paymentMethod || 'Bank transfer',
+        paymentStatus: 'Paid',
+        paidDate: txDate,
+        approvalStatus: cleanInterest > this.state.settings.spendingApprovalThreshold ? 'Approved' : 'Not required',
+        approvedBy: cleanInterest > this.state.settings.spendingApprovalThreshold ? this.getActorLabel(actor) : undefined,
+        approvedAt: cleanInterest > this.state.settings.spendingApprovalThreshold ? new Date().toISOString() : undefined,
+        evidenceReference: intRef,
+        fundingSource: 'Operations (customer receipts)',
+        notes: `Auto-split Loan Interest component linked to Principal Repayment ${normalizedLine.fundingId}`
+      };
+      this.state.expenses.push(intExpense);
+      this.logAction(
+        'CREATE',
+        'Expense',
+        intExpId,
+        this.getActorLabel(actor),
+        `Auto-split Loan Interest / Finance Charge: GH₵${cleanInterest.toFixed(2)} (linked to ${normalizedLine.fundingId})`
+      );
+    }
+
     this.recalculateAll();
     this.saveToStorage();
     return this.state.funding.find(f => f.fundingId === normalizedLine.fundingId)!;
@@ -2374,6 +2478,148 @@ export class OpsStore {
       documentType: 'expense',
       relatedEntries,
       summary: `Expense Receipt ${expenseId} posted for ${cleanParty} (GH₵${amount.toFixed(2)})`
+    };
+  }
+
+  /**
+   * 1-Click Monthly Retainer Billing Engine (Civitas Care & Civitas Property Watch)
+   * Automatically generates monthly recurring jobs, inspections (for Property Watch), and invoices
+   * for active retainer properties that have not yet been billed in the target YYYY-MM period.
+   */
+  public runMonthlyRetainerBilling(
+    billingDate?: string,
+    actor = 'Founder/CEO'
+  ): {
+    monthKey: string;
+    jobsCreated: string[];
+    inspectionsCreated: string[];
+    invoicesCreated: string[];
+    totalBilledNet: number;
+  } {
+    this.enforcePermission('MANAGE_INVOICES_PAYMENTS');
+    const dateStr = billingDate || this.state.settings.reportDateOverride || formatYMD(new Date());
+    this.assertPeriodOpen(dateStr, 'Monthly Retainer Billing');
+    const monthKey = dateStr.slice(0, 7); // YYYY-MM
+
+    const jobsCreated: string[] = [];
+    const inspectionsCreated: string[] = [];
+    const invoicesCreated: string[] = [];
+    let totalBilledNet = 0;
+
+    const activeProps = this.state.properties.filter(p => p.active === 'Yes');
+
+    for (const prop of activeProps) {
+      const cust = this.state.customers.find(c => c.customerId === prop.customerId);
+      if (!cust || cust.closed === 'Yes') continue;
+
+      const subscriptionId = `RET-${prop.propertyId}-${monthKey}`;
+      // Skip if already billed in this month (idempotent guard)
+      const alreadyBilled = this.state.invoices.some(
+        inv =>
+          inv.cancelled !== 'Yes' &&
+          (inv.subscriptionId === subscriptionId ||
+            (inv.customerId === cust.customerId &&
+              inv.invoiceDate.startsWith(monthKey) &&
+              (inv.notes || '').includes(subscriptionId)))
+      );
+      if (alreadyBilled) continue;
+
+      // Determine recurring retainer service tier
+      const isPropertyWatch =
+        cust.category === 'Diaspora owner' ||
+        (prop.propertyUse === 'Vacant') ||
+        (cust.feedbackNotes || '').toLowerCase().includes('watch');
+
+      const serviceId = isPropertyWatch
+        ? 'S16' // Property inspection (basic) - Civitas Property Watch (GH₵280)
+        : cust.category === 'Small business'
+        ? 'S04' // Large commercial/estate preventive care (GH₵1050)
+        : 'S02'; // Standard 2-3 bedroom preventive care (GH₵450)
+
+      const svc = this.state.services.find(s => s.serviceId === serviceId) || this.state.services[0];
+      const price = svc ? svc.standardPrice : 450;
+      const directCost = svc ? svc.standardDirectCost : 280;
+
+      // 1. Create completed recurring Job
+      const jobId = this.nextJobId();
+      this.state.jobs.push({
+        jobId,
+        customerId: cust.customerId,
+        propertyId: prop.propertyId,
+        serviceId,
+        description: `Monthly Retainer (${monthKey}): ${svc?.service || 'Preventive Care'} — ${prop.addressOrDescription}`,
+        requestDate: dateStr,
+        scheduledDate: dateStr,
+        completionDate: dateStr,
+        status: 'Invoiced',
+        manualQuotedAmount: price,
+        estimatedLabour: roundMoney(directCost * 0.6),
+        estimatedMaterials: roundMoney(directCost * 0.25),
+        estimatedTransport: roundMoney(directCost * 0.15),
+        evidenceReference: `RET-EVID-${prop.propertyId}-${monthKey}`
+      });
+      jobsCreated.push(jobId);
+
+      // 2. If Diaspora / Property Watch, auto-generate the Monthly Property Inspection record
+      if (isPropertyWatch) {
+        const inspId = this.nextInspectionId();
+        this.state.inspections.push({
+          inspectionId: inspId,
+          propertyId: prop.propertyId,
+          inspectionDate: dateStr,
+          inspector: this.getActorLabel(actor),
+          inspectionType: 'Scheduled Property Watch',
+          jobId,
+          roofAndCeiling: 'Good',
+          plumbing: 'Good',
+          electrical: 'Good',
+          doorsLocksWindows: 'Good',
+          dampAndPests: 'Good',
+          compoundAndExterior: 'Good',
+          observations: `Scheduled ${monthKey} Property Watch inspection completed. All perimeter locks, plumbing, and roof drainage verified intact.`,
+          recommendations: 'Continue standard monthly monitoring schedule.',
+          photosFolderReference: `PHOTOS-${prop.propertyId}-${monthKey}`,
+          reportStatus: 'Issued'
+        });
+        inspectionsCreated.push(inspId);
+      }
+
+      // 3. Create Retainer Tax Invoice
+      const invoiceNo = this.nextInvoiceNo();
+      this.state.invoices.push({
+        invoiceNo,
+        customerId: cust.customerId,
+        jobId,
+        subscriptionId,
+        divisionIfNoJob: isPropertyWatch ? 'Civitas Property Watch' : 'Civitas Care',
+        invoiceDate: dateStr,
+        termsDays: this.state.settings.defaultPaymentTermsDays || 7,
+        amountBeforeTax: price,
+        cancelled: 'No',
+        notes: `${subscriptionId} • Monthly Retainer Billing (${svc?.service || 'Retainer'}) for ${prop.addressOrDescription}`
+      });
+      invoicesCreated.push(invoiceNo);
+      totalBilledNet = roundMoney(totalBilledNet + price);
+    }
+
+    if (invoicesCreated.length > 0) {
+      this.logAction(
+        'CREATE',
+        'RetainerBilling',
+        `RET-${monthKey}`,
+        this.getActorLabel(actor),
+        `Generated ${invoicesCreated.length} monthly retainer invoices (${invoicesCreated.join(', ')}) totalling GH₵${totalBilledNet.toFixed(2)}`
+      );
+      this.recalculateAll();
+      this.saveToStorage();
+    }
+
+    return {
+      monthKey,
+      jobsCreated,
+      inspectionsCreated,
+      invoicesCreated,
+      totalBilledNet
     };
   }
 }

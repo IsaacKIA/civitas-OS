@@ -778,4 +778,106 @@ describe('Civitas Operations & Financial Control System — Version 2.1 Suite', 
     });
   });
 
+  it('Practical Ghana Accounting & Operations: Combined Loan Principal+Interest Split, 7.5% GRA WHT at Source, and Idempotent 1-Click Retainer Billing', () => {
+    const store = new OpsStore();
+    store.loadState(createDemoState());
+    store.authenticateUser('admin@civitasestate.com', '2026');
+
+    // 1. Draw down GH₵10,000 loan and repay GH₵2,000 Principal + GH₵350 Interest in a single installment
+    store.addFundingLine({
+      fundingId: 'FND0020',
+      dateReceived: '2026-08-01',
+      source: 'Bank / Microfinance Loan',
+      status: 'Received',
+      amountRequested: 10000,
+      amountApproved: 10000,
+      amountReceived: 10000,
+      lenderOrGrantor: 'Fidelity Bank SME Desk',
+      description: 'Equipment & working capital loan',
+      documentReference: 'FID-LN-2026'
+    });
+
+    const opexBeforeInstallment = store.getManagementAccounts().yearTotal.totalOpex;
+    store.addFundingLine(
+      {
+        fundingId: 'FND0021',
+        dateReceived: '2026-08-28',
+        source: 'Loan repayment',
+        status: 'Received',
+        amountRequested: 2000,
+        amountApproved: 2000,
+        amountReceived: 2000,
+        lenderOrGrantor: 'Fidelity Bank SME Desk',
+        description: 'Month 1 Loan Installment',
+        documentReference: 'FID-INST-01'
+      },
+      'Founder/CEO',
+      350 // GH₵350 concurrent interest charge
+    );
+
+    const acctAfterInstallment = store.getManagementAccounts();
+    assert.strictEqual(acctAfterInstallment.yearTotal.loansPayable, 8000, 'Loans Payable must reduce by GH₵2,000 principal only');
+    assert.strictEqual(
+      acctAfterInstallment.yearTotal.totalOpex,
+      roundMoney(opexBeforeInstallment + 350),
+      'Concurrent loan interest (GH₵350) must be booked to P&L Operating Expenses'
+    );
+
+    // 2. Corporate client invoice of GH₵2,000 settled with 7.5% GRA Withholding Tax (GH₵150) deducted at source
+    store.addInvoice({
+      invoiceNo: 'INV0800',
+      customerId: 'C0005', // Apex Logistics Ghana
+      divisionIfNoJob: 'Civitas Care',
+      invoiceDate: '2026-08-15',
+      termsDays: 7,
+      amountBeforeTax: 2000,
+      cancelled: 'No',
+      notes: 'August Corporate Facility Maintenance'
+    });
+
+    const cashBeforeWhtPay = store.getManagementAccounts().yearTotal.closingCash;
+    store.addPayment(
+      {
+        paymentId: 'PAY0800',
+        paymentDate: '2026-08-20',
+        invoiceNo: 'INV0800',
+        amount: 2000,
+        method: 'Bank transfer',
+        reference: 'APEX-BNK-800',
+        reconciliationStatus: 'Reconciled'
+      },
+      'Founder/CEO',
+      150, // 7.5% GRA WHT deducted at source
+      'GRA-WHT-2026-8801'
+    );
+
+    const settledInv = store.getState().invoices.find(i => i.invoiceNo === 'INV0800')!;
+    assert.strictEqual(settledInv.balance, 0, 'Invoice must be 100% settled (0.00 balance) when paid with WHT certificate');
+    assert.strictEqual(settledInv.status, 'Paid');
+
+    const cashAfterWhtPay = store.getManagementAccounts().yearTotal.closingCash;
+    assert.strictEqual(
+      cashAfterWhtPay,
+      roundMoney(cashBeforeWhtPay + 1850),
+      'Net bank cash must increase by 92.5% (GH₵1,850) after 7.5% WHT deduction at source'
+    );
+
+    // 3. Run 1-Click Monthly Retainer Billing for December 2026 (2026-12-01)
+    const retainerRun1 = store.runMonthlyRetainerBilling('2026-12-01');
+    assert.ok(retainerRun1.invoicesCreated.length > 0, 'Must generate retainer invoices for active properties');
+    assert.ok(retainerRun1.inspectionsCreated.length > 0, 'Must auto-generate Property Watch inspections for Diaspora properties');
+    assert.ok(retainerRun1.totalBilledNet > 0);
+
+    // Idempotency check: Running a second time for 2026-12 must create 0 duplicate invoices
+    const retainerRun2 = store.runMonthlyRetainerBilling('2026-12-01');
+    assert.strictEqual(retainerRun2.invoicesCreated.length, 0, 'Second retainer run in same month must be idempotent (0 duplicates)');
+
+    // 4. Verify all 6 Reconciliation Control Totals remain RECONCILED (0.00 diff)
+    const evaluation = store.getChecksEvaluation();
+    evaluation.controlTotals.forEach(t => {
+      assert.strictEqual(t.status, 'RECONCILED', `Control total ${t.name} must remain RECONCILED`);
+      assert.strictEqual(t.countOrValue, 0.00, `Difference for ${t.name} must remain 0.00`);
+    });
+  });
+
 });
